@@ -59,18 +59,30 @@ def _prepare_binary_image(image: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     height, width = gray.shape[:2]
-    scale = 1.5 if max(height, width) < 3500 else 1.0
+    scale = 2.0 if max(height, width) < 2000 else (1.5 if max(height, width) < 3500 else 1.0)
     if scale != 1.0:
         gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
 
     gray = _deskew(gray)
-    gray = cv2.GaussianBlur(gray, (3, 3), 0)
 
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    # ノイズ除去（歴史的文書のシミ・汚れに対応）
+    gray = cv2.bilateralFilter(gray, d=9, sigmaColor=75, sigmaSpace=75)
+
+    # コントラスト強化（CLAHEパラメータを歴史文書向けに調整）
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(16, 16))
     enhanced = clahe.apply(gray)
-    _, binary = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    kernel = np.ones((1, 1), np.uint8)
+    # 適応的二値化（印刷ムラに強い）
+    binary = cv2.adaptiveThreshold(
+        enhanced, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        blockSize=31,
+        C=10,
+    )
+
+    # 細線化した文字の補正
+    kernel = np.ones((2, 2), np.uint8)
     return cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
 
 

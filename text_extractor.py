@@ -202,7 +202,7 @@ def _normalize_ocr_text(text: str) -> str:
         normalized = normalized.replace(src, dst)
 
     lines = [_normalize_ocr_line(line.strip()) for line in normalized.splitlines()]
-    return "\n".join(line for line in lines if line)
+    return "\n".join(line for line in lines if line and not _is_noise_line(line))
 
 
 def _normalize_ocr_line(line: str) -> str:
@@ -215,12 +215,35 @@ def _normalize_ocr_line(line: str) -> str:
 
 def _replace_known_era_tokens(line: str) -> str:
     fuzzy_variants = {
+        # 江戸時代・日本年号
         "寛丈": "寛文",
         "元ろ": "元禄",
+        "元謙": "元禄",
         "宝氷": "宝永",
         "寛水": "寛永",
+        "覚水": "寛永",
+        "梵水": "寛永",
         "萬層": "萬暦",
+        "萬治": "万治",
+        "承麿": "承応",
+        "亭保": "享保",
+        "魂正": "享保",
+        "延亭": "延享",
+        "延讃": "延享",
+        "贅暦": "宝暦",
+        "贄暦": "宝暦",
+        "楽壬": "宝暦",
+        "天磬": "天和",
+        "天享": "天和",
+        "駿長": "慶長",
+        "文謙": "文政",
+        "正保": "正保",
         "顺治": "順治",
+        "宗禎": "崇禎",
+        # 中国年号
+        "康煕": "康熙",
+        "乹隆": "乾隆",
+        "雍正": "雍正",
     }
     for src, dst in fuzzy_variants.items():
         line = line.replace(src, dst)
@@ -234,7 +257,27 @@ def _replace_known_sexagenary_tokens(line: str) -> str:
         "丙笑": "丙寅",
         "丁王": "丁卯",
         "戊笑": "戊寅",
+        "庚宙": "庚申",
+        "笑末": "癸未",
+        "笑亥": "癸亥",
+        "笑酉": "癸酉",
+        "笑川": "癸丑",
+        "笑未": "癸未",
+        "茂酉": "戊酉",
+        "内辰": "丙辰",
     }
     for src, dst in replacements.items():
         line = line.replace(src, dst)
     return line
+
+
+def _is_noise_line(line: str) -> bool:
+    if len(line) <= 3:
+        # 短い行で日本語・漢字・数字がなければノイズ
+        has_cjk = any("一" <= ch <= "鿿" or "぀" <= ch <= "ヿ" for ch in line)
+        has_digit = any(ch.isdigit() or ch in "〇一二三四五六七八九十百千" for ch in line)
+        if not has_cjk and not has_digit:
+            return True
+    # ASCII記号のみで構成された行を除去
+    noise_ratio = sum(1 for ch in line if ch in "!|`'\",.:-_=+/\\()[]{}PpIlı") / max(len(line), 1)
+    return noise_ratio > 0.6
