@@ -45,25 +45,21 @@ class OCRProcessingError(Exception):
     """Raised when OCR processing cannot continue."""
 
 
-class EasyOCREngine:
-    """OCR engine backed by EasyOCR. Supports Japanese + English on CPU."""
+class PaddleOCREngine:
+    """OCR engine backed by PaddleOCR 2.7.x. Supports Japanese + English."""
 
-    def __init__(self, langs: list[str] | None = None, gpu: bool = False) -> None:
+    def __init__(self, lang: str = "japan", use_angle_cls: bool = True) -> None:
         try:
-            import easyocr
+            from paddleocr import PaddleOCR
         except ImportError as exc:
             raise OCRProcessingError(
-                "easyocr is not installed. Run: pip install easyocr"
+                "paddleocr is not installed. Run: pip install paddleocr==2.7.3"
             ) from exc
 
-        self._reader = easyocr.Reader(langs or ["ja", "en"], gpu=gpu)
+        self._engine = PaddleOCR(lang=lang, use_angle_cls=use_angle_cls)
 
     def ocr(self, img: str, cls: bool = True):
-        """Return EasyOCR results in a format compatible with _flatten_ocr_result."""
-        results = self._reader.readtext(img)
-        # Wrap in the same nested structure expected by _flatten_ocr_result:
-        # [[line, ...]] where line = [bbox, (text, conf)]
-        return [[[bbox, (text, float(conf))] for bbox, text, conf in results]]
+        return self._engine.ocr(img, cls=cls)
 
 
 def extract_text_from_image(
@@ -75,7 +71,7 @@ def extract_text_from_image(
     if not path.exists():
         raise FileNotFoundError(f"Image file not found: {path}")
 
-    ocr_engine = engine or EasyOCREngine()
+    ocr_engine = engine or PaddleOCREngine()
     segment_paths: list[Path] = []
     try:
         segment_paths = split_image_for_vertical_ocr(path)
@@ -106,7 +102,7 @@ def extract_text_from_images(
     if not image_paths:
         return OCRBatchResult(pages=[], errors=[])
 
-    ocr_engine = engine or EasyOCREngine()
+    ocr_engine = engine or PaddleOCREngine()
     total = len(image_paths)
     results: List[OCRPageResult] = []
     errors: List[OCRPageError] = []
