@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import tempfile
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable, List, Optional, Sequence
 
+import cv2
+import numpy as np
 from openpyxl import Workbook
 
 from layout_analyzer import LayoutRegion
@@ -57,7 +60,10 @@ class _SimpleHTMLTableParser(HTMLParser):
 
 
 
-def extract_tables(regions: Sequence[LayoutRegion]) -> list[TableData]:
+def extract_tables(
+    regions: Sequence[LayoutRegion],
+    image_paths: dict[int, Path] | None = None,
+) -> list[TableData]:
     tables: list[TableData] = []
     table_counts: dict[int, int] = {}
 
@@ -67,8 +73,18 @@ def extract_tables(regions: Sequence[LayoutRegion]) -> list[TableData]:
 
         table_counts[region.page_number] = table_counts.get(region.page_number, 0) + 1
         table_index = table_counts[region.page_number]
+
+        # まず既存の HTML / text から行を取得
         rows = _extract_rows_from_region(region.raw)
-        tables.append(TableData(page_number=region.page_number, table_index=table_index, rows=rows))
+
+        # 空の場合、画像クロップ + OCR で再構成
+        if not rows and image_paths and region.bbox:
+            img_path = image_paths.get(region.page_number)
+            if img_path:
+                rows = _extract_rows_from_image_crop(img_path, region.bbox)
+
+        if rows:
+            tables.append(TableData(page_number=region.page_number, table_index=table_index, rows=rows))
 
     return tables
 
@@ -118,3 +134,72 @@ def _parse_html_table(html: str) -> list[list[str]]:
     parser.feed(html)
     parser.close()
     return parser.rows
+
+
+def _extract_rows_from_image_crop(image_path: Path, bbox: list) -> list[list[str]]:
+    """表領域をクロップし PaddleOCR で認識、bbox の y/x 座標から行列を再構成する。"""
+    image = cv2.imread(str(image_path))
+    if image is None:
+        return []
+
+    h, w = image.shape[:2]
+    x1 = max(0, int(bbox[0]))
+    y1 = max(0, int(bbox[1]))
+    x2 = min(w, int(bbox[2]))
+    y2 = min(h, int(bbox[3]))
+    if x2 <= x1 or y2 <= y1:
+        return []
+
+    cropped = image[y1:y2, x1:x2]
+
+    tmp_path: Path | None = None
+    try:
+        from paddleocr import PaddleOCR
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        cv2.imwrite(str(tmp_path), cropped)
+
+        ocr = PaddleOCR(lang="japan", use_angle_cls=True)
+        result = ocr.ocr(str(tmp_path), cls=True)
+    except Exception:
+        return []
+    finally:
+        if tmp_path and tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+
+    if not result or not result[0]:
+        return []
+
+    # (y中心, x中心, テキスト) のリストを作成
+    items: list[tuple[float, float, str]] = []
+    for line in result[0]:
+        if not line or len(line) < 2:
+            continue
+        box, rec = line[0], line[1]
+        text = rec[0] if isinstance(rec, (list, tuple)) else str(rec)
+        if not text.strip():
+            continue
+        y_center = (box[0][1] + box[2][1]) / 2
+        x_center = (box[0][0] + box[2][0]) / 2
+        items.append((y_center, x_center, text.strip()))
+
+    if not items:
+        return []
+
+    # y 座標でソートして行をクラスタリング
+    items.sort(key=lambda item: item[0])
+    y_values = [item[0] for item in items]
+    row_gap = max((max(y_values) - min(y_values)) / max(len(y_values), 1) * 1.5, 20.0)
+
+    rows: list[list[tuple[float, float, str]]] = []
+    current: list[tuple[float, float, str]] = [items[0]]
+    for item in items[1:]:
+        if item[0] - current[-1][0] <= row_gap:
+            current.append(item)
+        else:
+            rows.append(current)
+            current = [item]
+    rows.append(current)
+
+    # 各行内を x 座標でソート（左→右）
+    return [[text for _, _, text in sorted(row, key=lambda r: r[1])] for row in rows]

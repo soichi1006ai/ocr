@@ -62,7 +62,12 @@ def main(argv: list[str] | None = None) -> int:
             image_paths,
             on_error=_print_layout_error,
         )
-        tables = extract_tables(layout_batch.regions)
+        image_path_by_page = {
+            int(p.stem.removeprefix("page_")): p
+            for p in image_paths
+            if p.stem.startswith("page_") and p.stem.removeprefix("page_").isdigit()
+        }
+        tables = extract_tables(layout_batch.regions, image_paths=image_path_by_page)
         workbook_path = write_tables_to_workbook(tables, output_dir / "tables.xlsx")
         docx_path = write_docx_results(ocr_batch.pages, tables, output_dir / "result.docx")
     except (FileNotFoundError, ValueError, PageSelectionError) as exc:
