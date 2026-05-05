@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from pdf_converter import PDFConversionError, PageSelectionError, convert_pdf_to_images
+from docx_exporter import DocxExportError, write_docx_results
 from layout_analyzer import LayoutAnalysisError, analyze_document_layout
 from table_extractor import TableExtractionError, extract_tables, write_tables_to_workbook
 from text_extractor import OCRProcessingError, extract_text_from_images, write_text_results
@@ -51,13 +52,13 @@ def main(argv: list[str] | None = None) -> int:
         results = extract_text_from_images(image_paths, on_progress=_print_progress)
         result_path = write_text_results(results, output_dir / "result.txt")
         layout_regions = analyze_document_layout(image_paths)
-        workbook_path = write_tables_to_workbook(
-            extract_tables(layout_regions), output_dir / "tables.xlsx"
-        )
+        tables = extract_tables(layout_regions)
+        workbook_path = write_tables_to_workbook(tables, output_dir / "tables.xlsx")
+        docx_path = write_docx_results(results, tables, output_dir / "result.docx")
     except (FileNotFoundError, ValueError, PageSelectionError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-    except (PDFConversionError, OCRProcessingError, LayoutAnalysisError, TableExtractionError) as exc:
+    except (PDFConversionError, OCRProcessingError, LayoutAnalysisError, TableExtractionError, DocxExportError) as exc:
         print(f"Processing failed: {exc}", file=sys.stderr)
         return 2
 
@@ -66,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Done: table output written to {workbook_path}")
     else:
         print("Warning: no tables detected; tables.xlsx was not created")
+    print(f"Done: Word output written to {docx_path}")
     return 0
 
 
