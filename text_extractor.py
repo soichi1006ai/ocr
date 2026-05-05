@@ -6,7 +6,11 @@ from typing import Callable, List, Optional, Protocol, Sequence
 import tempfile
 import unicodedata
 
-from image_preprocessor import ImagePreprocessingError, preprocess_image_for_ocr
+from image_preprocessor import (
+    ImagePreprocessingError,
+    preprocess_image_for_ocr,
+    split_image_for_vertical_ocr,
+)
 
 
 class OCREngine(Protocol):
@@ -68,19 +72,24 @@ def extract_text_from_image(
         raise FileNotFoundError(f"Image file not found: {path}")
 
     ocr_engine = engine or PaddleOCREngine()
-    preprocessed_path: Path | None = None
+    segment_paths: list[Path] = []
     try:
-        preprocessed_path = preprocess_image_for_ocr(path)
-        raw_result = ocr_engine.ocr(str(preprocessed_path), cls=True)
+        segment_paths = split_image_for_vertical_ocr(path)
+        texts: list[str] = []
+        for segment_path in segment_paths:
+            raw_result = ocr_engine.ocr(str(segment_path), cls=True)
+            text = _normalize_ocr_text(_flatten_ocr_result(raw_result))
+            if text:
+                texts.append(text)
     except ImagePreprocessingError as exc:
         raise OCRProcessingError(str(exc)) from exc
     except Exception as exc:
         raise OCRProcessingError(f"OCR failed for image: {path}") from exc
     finally:
-        if preprocessed_path is not None:
-            preprocessed_path.unlink(missing_ok=True)
+        for segment_path in segment_paths:
+            segment_path.unlink(missing_ok=True)
 
-    return _normalize_ocr_text(_flatten_ocr_result(raw_result))
+    return "\n".join(part for part in texts if part)
 
 
 

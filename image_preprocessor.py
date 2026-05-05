@@ -18,9 +18,46 @@ def preprocess_image_for_ocr(image_path: str | Path) -> Path:
     if image is None:
         raise ImagePreprocessingError(f"Failed to load image for preprocessing: {path}")
 
+    processed = _prepare_binary_image(image)
+
+    with tempfile.NamedTemporaryFile(prefix=f"{path.stem}_pre_", suffix=".png", delete=False) as tmp:
+        out_path = Path(tmp.name)
+
+    if not cv2.imwrite(str(out_path), processed):
+        raise ImagePreprocessingError(f"Failed to write preprocessed image: {out_path}")
+    return out_path
+
+
+
+def split_image_for_vertical_ocr(image_path: str | Path) -> list[Path]:
+    path = Path(image_path).expanduser().resolve()
+    image = cv2.imread(str(path))
+    if image is None:
+        raise ImagePreprocessingError(f"Failed to load image for preprocessing: {path}")
+
+    processed = _prepare_binary_image(image)
+    segments = _segment_vertical_columns(processed)
+    if len(segments) <= 1:
+        with tempfile.NamedTemporaryFile(prefix=f"{path.stem}_pre_", suffix=".png", delete=False) as tmp:
+            out_path = Path(tmp.name)
+        if not cv2.imwrite(str(out_path), processed):
+            raise ImagePreprocessingError(f"Failed to write preprocessed image: {out_path}")
+        return [out_path]
+
+    paths: list[Path] = []
+    for index, segment in enumerate(segments, start=1):
+        with tempfile.NamedTemporaryFile(prefix=f"{path.stem}_col{index:02d}_", suffix=".png", delete=False) as tmp:
+            out_path = Path(tmp.name)
+        if not cv2.imwrite(str(out_path), segment):
+            raise ImagePreprocessingError(f"Failed to write segmented image: {out_path}")
+        paths.append(out_path)
+    return paths
+
+
+
+def _prepare_binary_image(image: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    # Light upscale helps small scanned glyphs and thin print.
     height, width = gray.shape[:2]
     scale = 1.5 if max(height, width) < 3500 else 1.0
     if scale != 1.0:
@@ -34,14 +71,51 @@ def preprocess_image_for_ocr(image_path: str | Path) -> Path:
     _, binary = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
     kernel = np.ones((1, 1), np.uint8)
-    cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+    return cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
 
-    with tempfile.NamedTemporaryFile(prefix=f"{path.stem}_pre_", suffix=".png", delete=False) as tmp:
-        out_path = Path(tmp.name)
 
-    if not cv2.imwrite(str(out_path), cleaned):
-        raise ImagePreprocessingError(f"Failed to write preprocessed image: {out_path}")
-    return out_path
+
+def _segment_vertical_columns(binary: np.ndarray) -> list[np.ndarray]:
+    inverted = 255 - binary
+    col_density = (inverted > 0).sum(axis=0)
+    threshold = max(15, int(binary.shape[0] * 0.015))
+    active = col_density > threshold
+
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    for idx, on in enumerate(active):
+        if on and start is None:
+            start = idx
+        elif not on and start is not None:
+            if idx - start >= 40:
+                spans.append((start, idx))
+            start = None
+    if start is not None and len(active) - start >= 40:
+        spans.append((start, len(active)))
+
+    if len(spans) <= 1:
+        return [binary]
+
+    merged: list[tuple[int, int]] = []
+    for span in spans:
+        if not merged:
+            merged.append(span)
+            continue
+        prev_start, prev_end = merged[-1]
+        cur_start, cur_end = span
+        if cur_start - prev_end < 25:
+            merged[-1] = (prev_start, cur_end)
+        else:
+            merged.append(span)
+
+    segments: list[np.ndarray] = []
+    pad = 12
+    # Vertical Japanese typically reads right-to-left, so preserve that order.
+    for start, end in reversed(merged):
+        left = max(0, start - pad)
+        right = min(binary.shape[1], end + pad)
+        segments.append(binary[:, left:right])
+    return segments
 
 
 
