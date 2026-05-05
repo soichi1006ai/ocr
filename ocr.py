@@ -4,9 +4,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from pdf_converter import PDFConversionError, PageSelectionError, convert_pdf_to_images
 from docx_exporter import DocxExportError, write_docx_results
 from layout_analyzer import LayoutAnalysisError, analyze_document_layout
+from pdf_converter import PDFConversionError, PageSelectionError, convert_pdf_to_images
 from table_extractor import TableExtractionError, extract_tables, write_tables_to_workbook
 from text_extractor import OCRProcessingError, extract_text_from_images, write_text_results
 
@@ -14,7 +14,7 @@ from text_extractor import OCRProcessingError, extract_text_from_images, write_t
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Extract text from scanned PDFs using PaddleOCR."
+        description="Extract text and tables from scanned PDFs using PaddleOCR."
     )
     parser.add_argument("input", help="Input PDF path")
     parser.add_argument(
@@ -56,9 +56,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         if not ocr_batch.pages:
             raise OCRProcessingError("OCR failed for all pages.")
+
         result_path = write_text_results(ocr_batch.pages, output_dir / "result.txt")
-        layout_regions = analyze_document_layout(image_paths)
-        tables = extract_tables(layout_regions)
+        layout_batch = analyze_document_layout(
+            image_paths,
+            on_error=_print_layout_error,
+        )
+        tables = extract_tables(layout_batch.regions)
         workbook_path = write_tables_to_workbook(tables, output_dir / "tables.xlsx")
         docx_path = write_docx_results(ocr_batch.pages, tables, output_dir / "result.docx")
     except (FileNotFoundError, ValueError, PageSelectionError) as exc:
@@ -74,8 +78,14 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("Warning: no tables detected; tables.xlsx was not created")
     print(f"Done: Word output written to {docx_path}")
+
     if ocr_batch.errors:
         print(f"Warning: OCR failed on {len(ocr_batch.errors)} page(s); see stderr warnings above")
+    if layout_batch.errors:
+        print(
+            f"Warning: layout analysis failed on {len(layout_batch.errors)} page(s); "
+            "table output may be incomplete"
+        )
     return 0
 
 
@@ -84,9 +94,18 @@ def _print_progress(current_page: int, total_pages: int) -> None:
     print(f"[{current_page}/{total_pages}] ページ {current_page} を処理中...")
 
 
+
 def _print_page_error(current_page: int, image_path: Path, exc: Exception) -> None:
     print(
         f"Warning: page {current_page} OCR failed and was skipped ({image_path.name}): {exc}",
+        file=sys.stderr,
+    )
+
+
+
+def _print_layout_error(current_page: int, image_path: Path, exc: Exception) -> None:
+    print(
+        f"Warning: page {current_page} layout analysis failed and was skipped ({image_path.name}): {exc}",
         file=sys.stderr,
     )
 

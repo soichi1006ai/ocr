@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Protocol, Sequence
+from typing import Any, Callable, Optional, Protocol, Sequence
 
 
 class LayoutAnalyzerEngine(Protocol):
     def __call__(self, img: str):
         ...
+
+
+ErrorCallback = Callable[[int, Path, Exception], None]
 
 
 @dataclass(frozen=True)
@@ -16,6 +19,19 @@ class LayoutRegion:
     region_type: str
     bbox: list[int] | list[float] | None
     raw: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class LayoutPageError:
+    page_number: int
+    image_path: Path
+    error_message: str
+
+
+@dataclass(frozen=True)
+class LayoutBatchResult:
+    regions: list[LayoutRegion]
+    errors: list[LayoutPageError]
 
 
 class LayoutAnalysisError(Exception):
@@ -74,19 +90,34 @@ def analyze_document_layout(
     image_paths: Sequence[str | Path],
     *,
     engine: Optional[LayoutAnalyzerEngine] = None,
-) -> list[LayoutRegion]:
+    on_error: Optional[ErrorCallback] = None,
+) -> LayoutBatchResult:
     analyzer = engine or PPStructureEngine()
-    results: list[LayoutRegion] = []
+    regions: list[LayoutRegion] = []
+    errors: list[LayoutPageError] = []
+
     for index, image_path in enumerate(image_paths, start=1):
         resolved_path = Path(image_path).expanduser().resolve()
-        results.extend(
-            analyze_page_layout(
+        page_number = _infer_page_number(resolved_path, fallback=index)
+        try:
+            page_regions = analyze_page_layout(
                 resolved_path,
-                _infer_page_number(resolved_path, fallback=index),
+                page_number,
                 engine=analyzer,
             )
-        )
-    return results
+        except Exception as exc:
+            page_error = LayoutPageError(
+                page_number=page_number,
+                image_path=resolved_path,
+                error_message=str(exc),
+            )
+            errors.append(page_error)
+            if on_error is not None:
+                on_error(page_number, resolved_path, exc)
+        else:
+            regions.extend(page_regions)
+
+    return LayoutBatchResult(regions=regions, errors=errors)
 
 
 
