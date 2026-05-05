@@ -79,6 +79,11 @@ def main(argv: list[str] | None = None) -> int:
         print("Warning: no tables detected; tables.xlsx was not created")
     print(f"Done: Word output written to {docx_path}")
 
+    frame_candidates = [r for r in layout_batch.regions if r.region_type in {"frame_candidate", "table_frame_candidate"}]
+    table_like_candidates = [r for r in frame_candidates if r.region_type == "table_frame_candidate"]
+    if frame_candidates:
+        print(f"Info: detected {len(frame_candidates)} frame candidate(s), {len(table_like_candidates)} table-like")
+
     if ocr_batch.errors:
         print(f"Warning: OCR failed on {len(ocr_batch.errors)} page(s); see stderr warnings above")
     if layout_batch.errors:

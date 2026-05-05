@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol, Sequence
 
+from frame_detector import detect_frame_candidates
+
 
 class LayoutAnalyzerEngine(Protocol):
     def __call__(self, img: str):
@@ -80,6 +82,26 @@ def analyze_page_layout(
                 region_type=str(raw.get("type", "unknown")),
                 bbox=raw.get("bbox"),
                 raw=raw,
+            )
+        )
+
+    for candidate in detect_frame_candidates(path):
+        regions.append(
+            LayoutRegion(
+                page_number=page_number,
+                region_type=("table_frame_candidate" if candidate.is_table_like else "frame_candidate"),
+                bbox=candidate.bbox,
+                raw={
+                    "type": "table_frame_candidate" if candidate.is_table_like else "frame_candidate",
+                    "bbox": candidate.bbox,
+                    "frame": {
+                        "score": candidate.score,
+                        "horizontalLineRatio": candidate.horizontal_line_ratio,
+                        "verticalLineRatio": candidate.vertical_line_ratio,
+                        "intersections": candidate.intersections,
+                        "isTableLike": candidate.is_table_like,
+                    },
+                },
             )
         )
     return regions

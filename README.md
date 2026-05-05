@@ -22,6 +22,7 @@
 - PDF をページごとの PNG に変換
 - PaddleOCR による本文テキスト抽出
 - PP-Structure による表領域解析（レイアウト解析は `ch` モデルを使用）
+- 追加の枠検出と「表らしさ」ヒューリスティック判定
 - `result.txt` / `tables.xlsx` / `result.docx` を出力
 - `--pages 1,3-5` 形式のページ範囲指定
 - OCR前に傾き補正・コントラスト強調・二値化を実施
