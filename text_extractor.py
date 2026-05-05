@@ -11,6 +11,7 @@ class OCREngine(Protocol):
 
 
 ProgressCallback = Callable[[int, int], None]
+ErrorCallback = Callable[[int, Path, Exception], None]
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,19 @@ class OCRPageResult:
     page_number: int
     image_path: Path
     text: str
+
+
+@dataclass(frozen=True)
+class OCRPageError:
+    page_number: int
+    image_path: Path
+    error_message: str
+
+
+@dataclass(frozen=True)
+class OCRBatchResult:
+    pages: list[OCRPageResult]
+    errors: list[OCRPageError]
 
 
 class OCRProcessingError(Exception):
@@ -64,28 +78,43 @@ def extract_text_from_images(
     *,
     engine: Optional[OCREngine] = None,
     on_progress: Optional[ProgressCallback] = None,
-) -> List[OCRPageResult]:
+    on_error: Optional[ErrorCallback] = None,
+) -> OCRBatchResult:
     if not image_paths:
-        return []
+        return OCRBatchResult(pages=[], errors=[])
 
     ocr_engine = engine or PaddleOCREngine()
     total = len(image_paths)
     results: List[OCRPageResult] = []
+    errors: List[OCRPageError] = []
 
     for index, image_path in enumerate(image_paths, start=1):
         resolved_path = Path(image_path).expanduser().resolve()
-        text = extract_text_from_image(resolved_path, engine=ocr_engine)
-        results.append(
-            OCRPageResult(
-                page_number=_infer_page_number(resolved_path, fallback=index),
+        page_number = _infer_page_number(resolved_path, fallback=index)
+        try:
+            text = extract_text_from_image(resolved_path, engine=ocr_engine)
+        except Exception as exc:
+            page_error = OCRPageError(
+                page_number=page_number,
                 image_path=resolved_path,
-                text=text,
+                error_message=str(exc),
             )
-        )
-        if on_progress is not None:
-            on_progress(index, total)
+            errors.append(page_error)
+            if on_error is not None:
+                on_error(page_number, resolved_path, exc)
+        else:
+            results.append(
+                OCRPageResult(
+                    page_number=page_number,
+                    image_path=resolved_path,
+                    text=text,
+                )
+            )
+        finally:
+            if on_progress is not None:
+                on_progress(index, total)
 
-    return results
+    return OCRBatchResult(pages=results, errors=errors)
 
 
 

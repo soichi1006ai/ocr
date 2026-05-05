@@ -49,12 +49,18 @@ def main(argv: list[str] | None = None) -> int:
             dpi=args.dpi,
             pages=args.pages,
         )
-        results = extract_text_from_images(image_paths, on_progress=_print_progress)
-        result_path = write_text_results(results, output_dir / "result.txt")
+        ocr_batch = extract_text_from_images(
+            image_paths,
+            on_progress=_print_progress,
+            on_error=_print_page_error,
+        )
+        if not ocr_batch.pages:
+            raise OCRProcessingError("OCR failed for all pages.")
+        result_path = write_text_results(ocr_batch.pages, output_dir / "result.txt")
         layout_regions = analyze_document_layout(image_paths)
         tables = extract_tables(layout_regions)
         workbook_path = write_tables_to_workbook(tables, output_dir / "tables.xlsx")
-        docx_path = write_docx_results(results, tables, output_dir / "result.docx")
+        docx_path = write_docx_results(ocr_batch.pages, tables, output_dir / "result.docx")
     except (FileNotFoundError, ValueError, PageSelectionError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -68,12 +74,21 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("Warning: no tables detected; tables.xlsx was not created")
     print(f"Done: Word output written to {docx_path}")
+    if ocr_batch.errors:
+        print(f"Warning: OCR failed on {len(ocr_batch.errors)} page(s); see stderr warnings above")
     return 0
 
 
 
 def _print_progress(current_page: int, total_pages: int) -> None:
     print(f"[{current_page}/{total_pages}] ページ {current_page} を処理中...")
+
+
+def _print_page_error(current_page: int, image_path: Path, exc: Exception) -> None:
+    print(
+        f"Warning: page {current_page} OCR failed and was skipped ({image_path.name}): {exc}",
+        file=sys.stderr,
+    )
 
 
 if __name__ == "__main__":
