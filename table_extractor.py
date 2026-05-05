@@ -62,7 +62,7 @@ def extract_tables(regions: Sequence[LayoutRegion]) -> list[TableData]:
     table_counts: dict[int, int] = {}
 
     for region in regions:
-        if region.region_type != "table":
+        if region.region_type not in {"table", "table_frame_candidate"}:
             continue
 
         table_counts[region.page_number] = table_counts.get(region.page_number, 0) + 1

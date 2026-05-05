@@ -14,7 +14,7 @@ from text_extractor import OCRProcessingError, extract_text_from_images, write_t
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Extract text and tables from scanned PDFs using PaddleOCR."
+        description="Extract text and tables from scanned PDFs using EasyOCR."
     )
     parser.add_argument("input", help="Input PDF path")
     parser.add_argument(

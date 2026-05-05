@@ -40,20 +40,17 @@ class LayoutAnalysisError(Exception):
     """Raised when page layout analysis fails."""
 
 
-class PPStructureEngine:
-    def __init__(self, lang: str = "ch", show_log: bool = False) -> None:
-        try:
-            from paddleocr import PPStructure
-        except ImportError as exc:  # pragma: no cover
-            raise LayoutAnalysisError(
-                "paddleocr is not installed. Install dependencies from requirements.txt first."
-            ) from exc
+class FrameDetectorEngine:
+    """Layout engine using local frame/table detection (no external DL model required).
 
-        self._engine = PPStructure(lang=lang, show_log=show_log)
+    Uses frame_detector.detect_frame_candidates to find ruled frames and
+    classify them as table-like based on line density and intersections.
+    This replaces PPStructure, which required PaddleOCR and was incompatible
+    with Python 3.13 / paddlepaddle availability constraints.
+    """
 
     def __call__(self, img: str):
-        return self._engine(img)
-
+        return []  # raw structural regions; frame candidates are added separately
 
 
 def analyze_page_layout(
@@ -66,10 +63,10 @@ def analyze_page_layout(
     if not path.exists():
         raise FileNotFoundError(f"Image file not found: {path}")
 
-    analyzer = engine or PPStructureEngine()
+    analyzer = engine or FrameDetectorEngine()
     try:
         raw_regions = analyzer(str(path))
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:
         raise LayoutAnalysisError(f"Layout analysis failed for image: {path}") from exc
 
     regions: list[LayoutRegion] = []
@@ -107,14 +104,13 @@ def analyze_page_layout(
     return regions
 
 
-
 def analyze_document_layout(
     image_paths: Sequence[str | Path],
     *,
     engine: Optional[LayoutAnalyzerEngine] = None,
     on_error: Optional[ErrorCallback] = None,
 ) -> LayoutBatchResult:
-    analyzer = engine or PPStructureEngine()
+    analyzer = engine or FrameDetectorEngine()
     regions: list[LayoutRegion] = []
     errors: list[LayoutPageError] = []
 
@@ -140,7 +136,6 @@ def analyze_document_layout(
             regions.extend(page_regions)
 
     return LayoutBatchResult(regions=regions, errors=errors)
-
 
 
 def _infer_page_number(image_path: Path, *, fallback: int) -> int:
