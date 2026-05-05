@@ -1,0 +1,7 @@
+paddlepaddle
+paddleocr
+pdf2image
+Pillow
+openpyxl
+python-docx
+opencv-python
