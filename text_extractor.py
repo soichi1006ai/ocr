@@ -186,8 +186,76 @@ def _normalize_ocr_text(text: str) -> str:
         "O三": "〇三",
         "O二": "〇二",
         "O一": "〇一",
+        "O年": "〇年",
+        "0年": "〇年",
+        "王子": "甲子",
+        "乙王": "乙丑",
+        "王": "壬",
+        "已": "己",
     }
     for src, dst in replacements.items():
         normalized = normalized.replace(src, dst)
-    lines = [line.strip() for line in normalized.splitlines()]
+
+    lines = [_normalize_ocr_line(line.strip()) for line in normalized.splitlines()]
     return "\n".join(line for line in lines if line)
+
+
+def _normalize_ocr_line(line: str) -> str:
+    if not line:
+        return line
+    line = _replace_known_era_tokens(line)
+    line = _replace_known_sexagenary_tokens(line)
+    return line
+
+
+def _replace_known_era_tokens(line: str) -> str:
+    era_candidates = [
+        "慶長", "元和", "寛永", "正保", "慶安", "承応", "明暦", "万治", "萬治", "寛文",
+        "延宝", "天和", "貞享", "元禄", "宝永", "正徳", "享保", "元文", "寛保", "延享",
+        "寛延", "宝暦", "天正", "文禄", "康熙", "雍正", "乾隆", "萬暦", "泰昌", "天啓", "崇禎", "順治",
+    ]
+    fuzzy_variants = {
+        "寛丈": "寛文",
+        "元ろ": "元禄",
+        "宝氷": "宝永",
+        "正保": "正保",
+        "寛水": "寛永",
+        "萬層": "萬暦",
+        "天啓": "天啓",
+        "崇禎": "崇禎",
+        "顺治": "順治",
+    }
+    for src, dst in fuzzy_variants.items():
+        line = line.replace(src, dst)
+
+    compact = line.replace(" ", "")
+    for era in era_candidates:
+        if era in compact and era not in line:
+            line = compact
+            break
+    return line
+
+
+def _replace_known_sexagenary_tokens(line: str) -> str:
+    heavenly = "甲乙丙丁戊己庚辛壬癸"
+    earthly = "子丑寅卯辰巳午未申酉戌亥"
+    common_pairs = [a + b for a in heavenly for b in earthly]
+    replacements = {
+        "甲王": "甲子",
+        "乙王": "乙丑",
+        "丙笑": "丙寅",
+        "丁王": "丁卯",
+        "戊笑": "戊寅",
+        "己巳": "己巳",
+        "庚申": "庚申",
+        "辛酉": "辛酉",
+        "壬戌": "壬戌",
+        "癸亥": "癸亥",
+    }
+    for src, dst in replacements.items():
+        line = line.replace(src, dst)
+
+    for pair in common_pairs:
+        if pair in line:
+            return line
+    return line
