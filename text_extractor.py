@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional, Protocol, Sequence
+import tempfile
+import unicodedata
+
+from image_preprocessor import ImagePreprocessingError, preprocess_image_for_ocr
 
 
 class OCREngine(Protocol):
@@ -64,12 +68,19 @@ def extract_text_from_image(
         raise FileNotFoundError(f"Image file not found: {path}")
 
     ocr_engine = engine or PaddleOCREngine()
+    preprocessed_path: Path | None = None
     try:
-        raw_result = ocr_engine.ocr(str(path), cls=True)
+        preprocessed_path = preprocess_image_for_ocr(path)
+        raw_result = ocr_engine.ocr(str(preprocessed_path), cls=True)
+    except ImagePreprocessingError as exc:
+        raise OCRProcessingError(str(exc)) from exc
     except Exception as exc:
         raise OCRProcessingError(f"OCR failed for image: {path}") from exc
+    finally:
+        if preprocessed_path is not None:
+            preprocessed_path.unlink(missing_ok=True)
 
-    return _flatten_ocr_result(raw_result)
+    return _normalize_ocr_text(_flatten_ocr_result(raw_result))
 
 
 
@@ -157,3 +168,26 @@ def _infer_page_number(image_path: Path, *, fallback: int) -> int:
         if suffix.isdigit():
             return int(suffix)
     return fallback
+
+
+def _normalize_ocr_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", text)
+    replacements = {
+        "…": "...",
+        "—": "-",
+        "―": "-",
+        "‐": "-",
+        "O九": "〇九",
+        "O八": "〇八",
+        "O七": "〇七",
+        "O六": "〇六",
+        "O五": "〇五",
+        "O四": "〇四",
+        "O三": "〇三",
+        "O二": "〇二",
+        "O一": "〇一",
+    }
+    for src, dst in replacements.items():
+        normalized = normalized.replace(src, dst)
+    lines = [line.strip() for line in normalized.splitlines()]
+    return "\n".join(line for line in lines if line)
