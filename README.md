@@ -16,12 +16,12 @@
 - 既存コードと互換がない
 - CPU環境では推論が極端に遅いことがある
 
-そのため、`requirements.txt` の `paddleocr==2.7.3` を使ってください。
+そのため、`requirements.txt` の `paddleocr==2.7.3` を使ってください。あわせて `paddlepaddle==2.6.2` と `numpy<2` に固定しています。
 
 ## 機能
 - PDF をページごとの PNG に変換
 - PaddleOCR による本文テキスト抽出
-- PP-Structure による表領域解析
+- PP-Structure による表領域解析（レイアウト解析は `ch` モデルを使用）
 - `result.txt` / `tables.xlsx` / `result.docx` を出力
 - `--pages 1,3-5` 形式のページ範囲指定
 - OCR失敗ページを警告してスキップ継続

@@ -1,5 +1,6 @@
-paddlepaddle
+paddlepaddle==2.6.2
 paddleocr==2.7.3
+numpy<2
 pdf2image
 Pillow
 openpyxl

@@ -39,7 +39,7 @@ class LayoutAnalysisError(Exception):
 
 
 class PPStructureEngine:
-    def __init__(self, lang: str = "japan", show_log: bool = False) -> None:
+    def __init__(self, lang: str = "ch", show_log: bool = False) -> None:
         try:
             from paddleocr import PPStructure
         except ImportError as exc:  # pragma: no cover
