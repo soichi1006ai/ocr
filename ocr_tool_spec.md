@@ -24,6 +24,7 @@
 | `pdf2image` | PDF→画像変換 | `pip install pdf2image` |
 | `Pillow` | 画像処理 | `pip install Pillow` |
 | `openpyxl` | Excel出力 | `pip install openpyxl` |
+| `python-docx` | Word出力 | `pip install python-docx` |
 | `opencv-python` | 画像前処理 | `pip install opencv-python` |
 
 macOSでpdf2imageを使うには別途Homebrewで`poppler`が必要:
@@ -58,6 +59,7 @@ brew install poppler
 - 行・列のセル構造を保持すること
 - 出力形式:
   - **Excel (.xlsx)**: 表ごとに1シートとして保存
+  - **Word (.docx)**: ページごとの本文・表を確認しやすい形で出力（将来的な編集用）
   - シート名は `table_ページ番号_表番号`（例: `table_1_1`）
 
 ### 5. 出力ファイル
@@ -65,6 +67,7 @@ brew install poppler
 output/
 ├── result.txt          # 全ページのテキスト（ページ番号付き）
 ├── tables.xlsx         # 全ページの表をシートごとに格納
+├── result.docx         # 全ページの本文と表を確認しやすくまとめたWordファイル
 └── pages/
     ├── page_001.png    # 変換済み画像（中間ファイル）
     └── page_002.png
@@ -85,7 +88,7 @@ output/
     ├── text/title → PaddleOCR → result.txt に追記
     └── table      → テーブル認識 → tables.xlsx に追記
     ↓
-出力: result.txt + tables.xlsx
+出力: result.txt + tables.xlsx + result.docx
 ```
 
 ---
@@ -93,7 +96,7 @@ output/
 ## 開発タスクリスト（フェーズ別）
 
 ### フェーズ1 — 基盤（環境・PDF変換）
-- [ ] 必要ライブラリのインストール（paddlepaddle, paddleocr, pdf2image, Pillow, openpyxl, opencv-python）
+- [ ] 必要ライブラリのインストール（paddlepaddle, paddleocr, pdf2image, Pillow, openpyxl, python-docx, opencv-python）
 - [ ] `brew install poppler` の確認
 - [ ] `pdf_converter.py` の実装（PDF → PNG画像の変換）
 - [ ] 複数ページPDFで変換動作確認
@@ -108,6 +111,7 @@ output/
 - [ ] `layout_analyzer.py` の実装（PP-Structureによるレイアウト解析）
 - [ ] `table_extractor.py` の実装（表領域の認識・セル構造の抽出）
 - [ ] `tables.xlsx` への出力（シート名: `table_ページ番号_表番号`）
+- [ ] `result.docx` への出力（本文・表をページ順に配置）
 - [ ] 実際のスキャンPDFで表認識の精度確認
 
 ### フェーズ4 — CLI仕上げ
