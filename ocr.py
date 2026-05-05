@@ -14,7 +14,7 @@ from text_extractor import OCRProcessingError, extract_text_from_images, write_t
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Extract text and tables from scanned PDFs using EasyOCR."
+        description="Extract text and tables from scanned PDFs."
     )
     parser.add_argument("input", help="Input PDF path")
     parser.add_argument(
@@ -33,6 +33,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=300,
         help="Render DPI for PDF to image conversion (default: 300)",
     )
+    parser.add_argument(
+        "--engine",
+        choices=["paddleocr", "ndlocr"],
+        default="paddleocr",
+        help="OCR engine to use: paddleocr (default) or ndlocr (higher accuracy for historical Japanese)",
+    )
     return parser
 
 
@@ -49,31 +55,45 @@ def main(argv: list[str] | None = None) -> int:
             dpi=args.dpi,
             pages=args.pages,
         )
-        ocr_batch = extract_text_from_images(
-            image_paths,
-            on_progress=_print_progress,
-            on_error=_print_page_error,
-        )
-        if not ocr_batch.pages:
-            raise OCRProcessingError("OCR failed for all pages.")
+
+        print(f"[engine: {args.engine}]")
+
+        if args.engine == "ndlocr":
+            from ndlocr_engine import NDLOCRError, extract_tables_ndlocr, run_ndlocr
+            ocr_batch = run_ndlocr(
+                image_paths,
+                on_progress=_print_progress,
+                on_error=_print_page_error,
+            )
+            if not ocr_batch.pages:
+                raise OCRProcessingError("ndlocr-lite failed for all pages.")
+            tables = extract_tables_ndlocr(image_paths)
+        else:
+            ocr_batch = extract_text_from_images(
+                image_paths,
+                on_progress=_print_progress,
+                on_error=_print_page_error,
+            )
+            if not ocr_batch.pages:
+                raise OCRProcessingError("OCR failed for all pages.")
+            layout_batch = analyze_document_layout(
+                image_paths,
+                on_error=_print_layout_error,
+            )
+            image_path_by_page = {
+                int(p.stem.removeprefix("page_")): p
+                for p in image_paths
+                if p.stem.startswith("page_") and p.stem.removeprefix("page_").isdigit()
+            }
+            tables = extract_tables(layout_batch.regions, image_paths=image_path_by_page)
 
         result_path = write_text_results(ocr_batch.pages, output_dir / "result.txt")
-        layout_batch = analyze_document_layout(
-            image_paths,
-            on_error=_print_layout_error,
-        )
-        image_path_by_page = {
-            int(p.stem.removeprefix("page_")): p
-            for p in image_paths
-            if p.stem.startswith("page_") and p.stem.removeprefix("page_").isdigit()
-        }
-        tables = extract_tables(layout_batch.regions, image_paths=image_path_by_page)
         workbook_path = write_tables_to_workbook(tables, output_dir / "tables.xlsx")
         docx_path = write_docx_results(ocr_batch.pages, tables, output_dir / "result.docx")
     except (FileNotFoundError, ValueError, PageSelectionError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-    except (PDFConversionError, OCRProcessingError, LayoutAnalysisError, TableExtractionError, DocxExportError) as exc:
+    except (PDFConversionError, OCRProcessingError, LayoutAnalysisError, TableExtractionError, DocxExportError, Exception) as exc:
         print(f"Processing failed: {exc}", file=sys.stderr)
         return 2
 
@@ -84,18 +104,19 @@ def main(argv: list[str] | None = None) -> int:
         print("Warning: no tables detected; tables.xlsx was not created")
     print(f"Done: Word output written to {docx_path}")
 
-    frame_candidates = [r for r in layout_batch.regions if r.region_type in {"frame_candidate", "table_frame_candidate"}]
-    table_like_candidates = [r for r in frame_candidates if r.region_type == "table_frame_candidate"]
-    if frame_candidates:
-        print(f"Info: detected {len(frame_candidates)} frame candidate(s), {len(table_like_candidates)} table-like")
+    if args.engine == "paddleocr":
+        frame_candidates = [r for r in layout_batch.regions if r.region_type in {"frame_candidate", "table_frame_candidate"}]
+        table_like_candidates = [r for r in frame_candidates if r.region_type == "table_frame_candidate"]
+        if frame_candidates:
+            print(f"Info: detected {len(frame_candidates)} frame candidate(s), {len(table_like_candidates)} table-like")
+        if layout_batch.errors:
+            print(
+                f"Warning: layout analysis failed on {len(layout_batch.errors)} page(s); "
+                "table output may be incomplete"
+            )
 
     if ocr_batch.errors:
         print(f"Warning: OCR failed on {len(ocr_batch.errors)} page(s); see stderr warnings above")
-    if layout_batch.errors:
-        print(
-            f"Warning: layout analysis failed on {len(layout_batch.errors)} page(s); "
-            "table output may be incomplete"
-        )
     return 0
 
 
