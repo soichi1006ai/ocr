@@ -67,6 +67,15 @@ def extract_tables(
     tables: list[TableData] = []
     table_counts: dict[int, int] = {}
 
+    # OCRエンジンを1回だけ初期化して全テーブルで使い回す
+    ocr_engine = None
+    if image_paths:
+        try:
+            from paddleocr import PaddleOCR
+            ocr_engine = PaddleOCR(lang="japan", use_angle_cls=True)
+        except Exception:
+            pass
+
     for region in regions:
         if region.region_type not in {"table", "table_frame_candidate"}:
             continue
@@ -77,11 +86,11 @@ def extract_tables(
         # まず既存の HTML / text から行を取得
         rows = _extract_rows_from_region(region.raw)
 
-        # 空の場合、画像クロップ + OCR で再構成
-        if not rows and image_paths and region.bbox:
+        # 空の場合、グリッド線 → セル単位 OCR で再構成
+        if not rows and ocr_engine and image_paths and region.bbox:
             img_path = image_paths.get(region.page_number)
             if img_path:
-                rows = _extract_rows_from_image_crop(img_path, region.bbox)
+                rows = _extract_rows_from_image_crop(img_path, region.bbox, ocr_engine)
 
         if rows:
             tables.append(TableData(page_number=region.page_number, table_index=table_index, rows=rows))
@@ -136,31 +145,84 @@ def _parse_html_table(html: str) -> list[list[str]]:
     return parser.rows
 
 
-def _extract_rows_from_image_crop(image_path: Path, bbox: list) -> list[list[str]]:
-    """表領域をクロップし PaddleOCR で認識、bbox の y/x 座標から行列を再構成する。"""
+def _extract_rows_from_image_crop(
+    image_path: Path,
+    bbox: list,
+    ocr_engine: Any = None,
+) -> list[list[str]]:
+    """表領域をグリッド線で分割してセル単位にOCRし、行列を再構成する。"""
+    from frame_detector import detect_grid_lines
+
     image = cv2.imread(str(image_path))
     if image is None:
         return []
 
     h, w = image.shape[:2]
-    x1 = max(0, int(bbox[0]))
-    y1 = max(0, int(bbox[1]))
-    x2 = min(w, int(bbox[2]))
-    y2 = min(h, int(bbox[3]))
+    x1, y1 = max(0, int(bbox[0])), max(0, int(bbox[1]))
+    x2, y2 = min(w, int(bbox[2])), min(h, int(bbox[3]))
     if x2 <= x1 or y2 <= y1:
         return []
 
+    int_bbox = [x1, y1, x2, y2]
+    h_lines, v_lines = detect_grid_lines(image_path, int_bbox)
+
+    # グリッド線が十分あればセル単位OCR、なければbboxクラスタリングにフォールバック
+    if len(h_lines) >= 2 and len(v_lines) >= 2:
+        return _ocr_grid_cells(image, int_bbox, h_lines, v_lines, ocr_engine)
+    else:
+        return _ocr_bbox_clustering(image, int_bbox, ocr_engine)
+
+
+def _ocr_grid_cells(
+    image: np.ndarray,
+    bbox: list[int],
+    h_lines: list[int],
+    v_lines: list[int],
+    ocr_engine: Any,
+) -> list[list[str]]:
+    """罫線で定義されたセルをひとつずつOCRして表を再構成する。"""
+    x1, y1 = bbox[0], bbox[1]
+    rows: list[list[str]] = []
+    pad = 2
+
+    for r in range(len(h_lines) - 1):
+        row: list[str] = []
+        cy1 = y1 + h_lines[r] + pad
+        cy2 = y1 + h_lines[r + 1] - pad
+
+        for c in range(len(v_lines) - 1):
+            cx1 = x1 + v_lines[c] + pad
+            cx2 = x1 + v_lines[c + 1] - pad
+
+            cell_img = image[cy1:cy2, cx1:cx2]
+            if cell_img.size == 0 or cell_img.shape[0] < 5 or cell_img.shape[1] < 5:
+                row.append("")
+                continue
+
+            text = _ocr_single_cell(cell_img, ocr_engine)
+            row.append(text)
+
+        if any(cell.strip() for cell in row):
+            rows.append(row)
+
+    return rows
+
+
+def _ocr_bbox_clustering(
+    image: np.ndarray,
+    bbox: list[int],
+    ocr_engine: Any,
+) -> list[list[str]]:
+    """グリッド線が取れない場合、OCRのbbox y座標でクラスタリングして行を作る。"""
+    x1, y1, x2, y2 = bbox
     cropped = image[y1:y2, x1:x2]
 
     tmp_path: Path | None = None
     try:
-        from paddleocr import PaddleOCR
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
             tmp_path = Path(tmp.name)
         cv2.imwrite(str(tmp_path), cropped)
-
-        ocr = PaddleOCR(lang="japan", use_angle_cls=True)
-        result = ocr.ocr(str(tmp_path), cls=True)
+        result = ocr_engine.ocr(str(tmp_path), cls=True)
     except Exception:
         return []
     finally:
@@ -170,7 +232,6 @@ def _extract_rows_from_image_crop(image_path: Path, bbox: list) -> list[list[str
     if not result or not result[0]:
         return []
 
-    # (y中心, x中心, テキスト) のリストを作成
     items: list[tuple[float, float, str]] = []
     for line in result[0]:
         if not line or len(line) < 2:
@@ -186,20 +247,46 @@ def _extract_rows_from_image_crop(image_path: Path, bbox: list) -> list[list[str
     if not items:
         return []
 
-    # y 座標でソートして行をクラスタリング
     items.sort(key=lambda item: item[0])
     y_values = [item[0] for item in items]
     row_gap = max((max(y_values) - min(y_values)) / max(len(y_values), 1) * 1.5, 20.0)
 
-    rows: list[list[tuple[float, float, str]]] = []
-    current: list[tuple[float, float, str]] = [items[0]]
+    row_groups: list[list[tuple[float, float, str]]] = []
+    current = [items[0]]
     for item in items[1:]:
         if item[0] - current[-1][0] <= row_gap:
             current.append(item)
         else:
-            rows.append(current)
+            row_groups.append(current)
             current = [item]
-    rows.append(current)
+    row_groups.append(current)
 
-    # 各行内を x 座標でソート（左→右）
-    return [[text for _, _, text in sorted(row, key=lambda r: r[1])] for row in rows]
+    return [[text for _, _, text in sorted(row, key=lambda r: r[1])] for row in row_groups]
+
+
+def _ocr_single_cell(cell_img: np.ndarray, ocr_engine: Any) -> str:
+    """セル画像をOCRして文字列を返す。"""
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        cv2.imwrite(str(tmp_path), cell_img)
+        result = ocr_engine.ocr(str(tmp_path), cls=True)
+    except Exception:
+        return ""
+    finally:
+        if tmp_path and tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+
+    if not result or not result[0]:
+        return ""
+
+    texts = []
+    for line in result[0]:
+        if not line or len(line) < 2:
+            continue
+        rec = line[1]
+        text = rec[0] if isinstance(rec, (list, tuple)) else str(rec)
+        if text.strip():
+            texts.append(text.strip())
+    return " ".join(texts)

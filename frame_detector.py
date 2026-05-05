@@ -101,6 +101,71 @@ def _extract_lines(binary: np.ndarray, *, axis: str) -> np.ndarray:
 
 
 
+def detect_grid_lines(
+    image_path: str | Path,
+    bbox: list[int],
+) -> tuple[list[int], list[int]]:
+    """表領域 bbox 内の水平・垂直罫線の位置リストを返す。(h_positions, v_positions)"""
+    path = Path(image_path).expanduser().resolve()
+    image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+    if image is None:
+        return [], []
+
+    x1, y1, x2, y2 = max(0, bbox[0]), max(0, bbox[1]), bbox[2], bbox[3]
+    roi = image[y1:y2, x1:x2]
+    if roi.size == 0:
+        return [], []
+
+    binary = _binarize(roi)
+    horizontal = _extract_lines(binary, axis="horizontal")
+    vertical = _extract_lines(binary, axis="vertical")
+
+    h_w = horizontal.shape[1]
+    h_positions = [
+        y for y in range(horizontal.shape[0])
+        if np.count_nonzero(horizontal[y]) > h_w * 0.18
+    ]
+
+    v_h = vertical.shape[0]
+    v_positions = [
+        x for x in range(vertical.shape[1])
+        if np.count_nonzero(vertical[:, x]) > v_h * 0.28
+    ]
+
+    h_clustered = _cluster_positions(h_positions, gap=6)
+    v_clustered = _cluster_positions(v_positions, gap=6)
+
+    # セル幅・高さが小さすぎる線は除去（文字ストロークとの混同を防ぐ）
+    h_clustered = _filter_min_spacing(h_clustered, min_gap=18)
+    v_clustered = _filter_min_spacing(v_clustered, min_gap=22)
+
+    return h_clustered, v_clustered
+
+
+def _cluster_positions(positions: list[int], gap: int = 6) -> list[int]:
+    if not positions:
+        return []
+    positions = sorted(set(positions))
+    clusters: list[list[int]] = [[positions[0]]]
+    for pos in positions[1:]:
+        if pos - clusters[-1][-1] <= gap:
+            clusters[-1].append(pos)
+        else:
+            clusters.append([pos])
+    return [int(np.mean(c)) for c in clusters]
+
+
+def _filter_min_spacing(positions: list[int], min_gap: int) -> list[int]:
+    """隣接する線の間隔が min_gap 未満のものを間引く。"""
+    if len(positions) <= 1:
+        return positions
+    filtered = [positions[0]]
+    for pos in positions[1:]:
+        if pos - filtered[-1] >= min_gap:
+            filtered.append(pos)
+    return filtered
+
+
 def _dedupe_candidates(candidates: list[FrameCandidate]) -> list[FrameCandidate]:
     kept: list[FrameCandidate] = []
     for candidate in candidates:
