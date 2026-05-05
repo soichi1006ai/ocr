@@ -6,7 +6,7 @@ from typing import Callable, List, Optional, Protocol, Sequence
 
 
 class OCREngine(Protocol):
-    def ocr(self, img: str, cls: bool = True):
+    def ocr(self, img: str):
         ...
 
 
@@ -47,10 +47,10 @@ class PaddleOCREngine:
                 "paddleocr is not installed. Install dependencies from requirements.txt first."
             ) from exc
 
-        self._engine = PaddleOCR(lang=lang, use_angle_cls=use_angle_cls)
+        self._engine = PaddleOCR(lang=lang, use_textline_orientation=use_angle_cls)
 
-    def ocr(self, img: str, cls: bool = True):
-        return self._engine.ocr(img, cls=cls)
+    def ocr(self, img: str):
+        return self._engine.predict(img)
 
 
 
@@ -65,8 +65,8 @@ def extract_text_from_image(
 
     ocr_engine = engine or PaddleOCREngine()
     try:
-        raw_result = ocr_engine.ocr(str(path), cls=True)
-    except Exception as exc:  # pragma: no cover - third-party runtime behavior
+        raw_result = ocr_engine.ocr(str(path))
+    except Exception as exc:
         raise OCRProcessingError(f"OCR failed for image: {path}") from exc
 
     return _flatten_ocr_result(raw_result)
@@ -133,19 +133,33 @@ def write_text_results(results: Sequence[OCRPageResult], output_path: str | Path
 
 def _flatten_ocr_result(raw_result) -> str:
     lines: List[str] = []
-    for block in raw_result or []:
-        if not block:
+    for result in raw_result or []:
+        if result is None:
             continue
-        for line in block:
-            if not line or len(line) < 2:
+        # PaddleOCR 3.x: result is a dict-like object with rec_texts list
+        if hasattr(result, "__getitem__"):
+            texts = None
+            try:
+                texts = result["rec_texts"]
+            except (KeyError, TypeError):
+                pass
+            if texts is not None:
+                for text in texts:
+                    if isinstance(text, str) and text.strip():
+                        lines.append(text.strip())
                 continue
-            candidate = line[1]
-            if isinstance(candidate, (list, tuple)) and candidate:
-                text = candidate[0]
-            else:
-                text = candidate
-            if isinstance(text, str) and text.strip():
-                lines.append(text.strip())
+        # fallback: old API format [[box, (text, score)], ...]
+        if isinstance(result, (list, tuple)):
+            for line in result:
+                if not line or len(line) < 2:
+                    continue
+                candidate = line[1]
+                if isinstance(candidate, (list, tuple)) and candidate:
+                    text = candidate[0]
+                else:
+                    text = candidate
+                if isinstance(text, str) and text.strip():
+                    lines.append(text.strip())
     return "\n".join(lines)
 
 
