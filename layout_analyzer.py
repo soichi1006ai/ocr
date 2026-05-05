@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, Protocol, Sequence
+from typing import Any, Optional, Protocol, Sequence
 
 
 class LayoutAnalyzerEngine(Protocol):
@@ -78,5 +78,22 @@ def analyze_document_layout(
     analyzer = engine or PPStructureEngine()
     results: list[LayoutRegion] = []
     for index, image_path in enumerate(image_paths, start=1):
-        results.extend(analyze_page_layout(image_path, index, engine=analyzer))
+        resolved_path = Path(image_path).expanduser().resolve()
+        results.extend(
+            analyze_page_layout(
+                resolved_path,
+                _infer_page_number(resolved_path, fallback=index),
+                engine=analyzer,
+            )
+        )
     return results
+
+
+
+def _infer_page_number(image_path: Path, *, fallback: int) -> int:
+    stem = image_path.stem
+    if stem.startswith("page_"):
+        suffix = stem.removeprefix("page_")
+        if suffix.isdigit():
+            return int(suffix)
+    return fallback

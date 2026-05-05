@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional, Protocol, Sequence
+from typing import Callable, List, Optional, Protocol, Sequence
 
 
 class OCREngine(Protocol):
@@ -73,11 +73,12 @@ def extract_text_from_images(
     results: List[OCRPageResult] = []
 
     for index, image_path in enumerate(image_paths, start=1):
-        text = extract_text_from_image(image_path, engine=ocr_engine)
+        resolved_path = Path(image_path).expanduser().resolve()
+        text = extract_text_from_image(resolved_path, engine=ocr_engine)
         results.append(
             OCRPageResult(
-                page_number=index,
-                image_path=Path(image_path).expanduser().resolve(),
+                page_number=_infer_page_number(resolved_path, fallback=index),
+                image_path=resolved_path,
                 text=text,
             )
         )
@@ -117,3 +118,13 @@ def _flatten_ocr_result(raw_result) -> str:
             if isinstance(text, str) and text.strip():
                 lines.append(text.strip())
     return "\n".join(lines)
+
+
+
+def _infer_page_number(image_path: Path, *, fallback: int) -> int:
+    stem = image_path.stem
+    if stem.startswith("page_"):
+        suffix = stem.removeprefix("page_")
+        if suffix.isdigit():
+            return int(suffix)
+    return fallback
