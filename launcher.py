@@ -1,0 +1,718 @@
+from __future__ import annotations
+
+import sys
+import subprocess
+from pathlib import Path
+from typing import Optional
+
+from PyQt6.QtCore import (
+    Qt, QThread, pyqtSignal, QMimeData, QUrl, QProcess
+)
+from PyQt6.QtGui import (
+    QColor, QDragEnterEvent, QDropEvent, QPalette, QFont, QIcon,
+    QPixmap, QPainter, QPen
+)
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QFileDialog, QProgressBar, QGroupBox,
+    QRadioButton, QButtonGroup, QCheckBox, QLineEdit, QSpinBox,
+    QScrollArea, QFrame, QSizePolicy, QTextEdit, QSplitter,
+    QComboBox, QMessageBox
+)
+
+
+# ────────────────────────────────────────────────
+#  OCR Worker Thread
+# ────────────────────────────────────────────────
+
+class OCRWorker(QThread):
+    progress_line = pyqtSignal(str)       # stdout/stderr line
+    file_started  = pyqtSignal(str, int)  # (filepath, index 1-based)
+    file_done     = pyqtSignal(str, bool, str)  # (filepath, success, message)
+    all_done      = pyqtSignal()
+
+    def __init__(
+        self,
+        files: list[Path],
+        engine: str,
+        dpi: int,
+        output_dir: Path,
+        ocr_py: Path,
+    ) -> None:
+        super().__init__()
+        self._files = files
+        self._engine = engine
+        self._dpi = dpi
+        self._output_dir = output_dir
+        self._ocr_py = ocr_py
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def run(self) -> None:
+        for i, file_path in enumerate(self._files, start=1):
+            if self._cancelled:
+                break
+            self.file_started.emit(str(file_path), i)
+            stem = file_path.stem
+            out_dir = self._output_dir / stem
+            out_dir.mkdir(parents=True, exist_ok=True)
+            cmd = [
+                sys.executable,
+                str(self._ocr_py),
+                str(file_path),
+                "--output", str(out_dir),
+                "--dpi",    str(self._dpi),
+                "--engine", self._engine,
+            ]
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    line = line.rstrip()
+                    if line:
+                        self.progress_line.emit(line)
+                proc.wait()
+                if proc.returncode == 0:
+                    self.file_done.emit(str(file_path), True, f"→ {out_dir}")
+                else:
+                    self.file_done.emit(str(file_path), False, f"終了コード {proc.returncode}")
+            except Exception as exc:
+                self.file_done.emit(str(file_path), False, str(exc))
+
+        self.all_done.emit()
+
+
+# ────────────────────────────────────────────────
+#  File Chip Widget
+# ────────────────────────────────────────────────
+
+class FileChip(QFrame):
+    removed = pyqtSignal(str)  # file path
+
+    def __init__(self, file_path: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._path = file_path
+        self.setObjectName("FileChip")
+        self.setFixedHeight(28)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 2, 4, 2)
+        layout.setSpacing(4)
+
+        name = Path(file_path).name
+        lbl = QLabel(name)
+        lbl.setFont(QFont("Helvetica Neue", 11))
+        lbl.setToolTip(file_path)
+        layout.addWidget(lbl)
+
+        btn = QPushButton("✕")
+        btn.setFixedSize(18, 18)
+        btn.setFlat(True)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.clicked.connect(lambda: self.removed.emit(self._path))
+        layout.addWidget(btn)
+
+    def path(self) -> str:
+        return self._path
+
+
+# ────────────────────────────────────────────────
+#  Drop Zone Widget
+# ────────────────────────────────────────────────
+
+class DropZone(QFrame):
+    files_dropped = pyqtSignal(list)  # list[str]
+
+    SUPPORTED = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif"}
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("DropZone")
+        self.setAcceptDrops(True)
+        self.setMinimumHeight(110)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._hovering = False
+
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        icon_lbl = QLabel("⬆")
+        icon_lbl.setFont(QFont("Helvetica Neue", 32))
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setObjectName("DropIcon")
+        layout.addWidget(icon_lbl)
+
+        hint = QLabel("PDF / PNG / JPG / TIFF をここにドロップ")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setFont(QFont("Helvetica Neue", 12))
+        layout.addWidget(hint)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        browse_btn = QPushButton("ファイルを選択")
+        browse_btn.setObjectName("BrowseBtn")
+        browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        browse_btn.clicked.connect(self._browse)
+        btn_layout.addWidget(browse_btn)
+        layout.addLayout(btn_layout)
+
+    def _browse(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "ファイルを選択", str(Path.home()),
+            "対応ファイル (*.pdf *.png *.jpg *.jpeg *.tiff *.tif)"
+        )
+        if paths:
+            self.files_dropped.emit(paths)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData().hasUrls():
+            paths = [u.toLocalFile() for u in event.mimeData().urls()]
+            if any(Path(p).suffix.lower() in self.SUPPORTED for p in paths):
+                event.acceptProposedAction()
+                self._set_hover(True)
+                return
+        event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:  # type: ignore[override]
+        self._set_hover(False)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        self._set_hover(False)
+        paths = [
+            u.toLocalFile()
+            for u in event.mimeData().urls()
+            if Path(u.toLocalFile()).suffix.lower() in self.SUPPORTED
+        ]
+        if paths:
+            self.files_dropped.emit(paths)
+            event.acceptProposedAction()
+
+    def _set_hover(self, hovering: bool) -> None:
+        self._hovering = hovering
+        self.setProperty("hovering", hovering)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+
+# ────────────────────────────────────────────────
+#  Main Window
+# ────────────────────────────────────────────────
+
+class MainWindow(QMainWindow):
+    OCR_PY = Path(__file__).parent / "ocr.py"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("OCR Launcher")
+        self.setMinimumWidth(560)
+        self.resize(620, 760)
+        self._files: list[str] = []
+        self._chips: dict[str, FileChip] = {}
+        self._worker: Optional[OCRWorker] = None
+        self._running = False
+
+        self._build_ui()
+        self._apply_stylesheet()
+
+    # ── UI Construction ──────────────────────────
+
+    def _build_ui(self) -> None:
+        root = QWidget()
+        self.setCentralWidget(root)
+        vbox = QVBoxLayout(root)
+        vbox.setContentsMargins(20, 16, 20, 16)
+        vbox.setSpacing(12)
+
+        # Header
+        header = QHBoxLayout()
+        title = QLabel("OCR Launcher")
+        title.setFont(QFont("Helvetica Neue", 18, QFont.Weight.Bold))
+        title.setObjectName("Title")
+        header.addWidget(title)
+        header.addStretch()
+        vbox.addLayout(header)
+
+        # Drop zone
+        self._drop_zone = DropZone()
+        self._drop_zone.files_dropped.connect(self._add_files)
+        vbox.addWidget(self._drop_zone)
+
+        # File chip area
+        chip_scroll = QScrollArea()
+        chip_scroll.setObjectName("ChipArea")
+        chip_scroll.setWidgetResizable(True)
+        chip_scroll.setFixedHeight(72)
+        chip_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        chip_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        chip_container = QWidget()
+        chip_container.setObjectName("ChipContainer")
+        self._chip_layout = QHBoxLayout(chip_container)
+        self._chip_layout.setContentsMargins(8, 8, 8, 8)
+        self._chip_layout.setSpacing(6)
+        self._chip_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        self._empty_label = QLabel("ファイルが選択されていません")
+        self._empty_label.setObjectName("EmptyHint")
+        self._chip_layout.addWidget(self._empty_label)
+
+        chip_scroll.setWidget(chip_container)
+        vbox.addWidget(chip_scroll)
+
+        # Settings group
+        settings = QGroupBox("設定")
+        settings.setObjectName("SettingsGroup")
+        sbox = QVBoxLayout(settings)
+        sbox.setSpacing(10)
+
+        # Engine
+        engine_row = QHBoxLayout()
+        engine_lbl = QLabel("エンジン")
+        engine_lbl.setFixedWidth(80)
+        engine_row.addWidget(engine_lbl)
+        self._engine_group = QButtonGroup(self)
+        self._paddle_radio = QRadioButton("PaddleOCR（通常）")
+        self._ndl_radio    = QRadioButton("NDLOCR（古典特化）")
+        self._paddle_radio.setChecked(True)
+        self._engine_group.addButton(self._paddle_radio, 0)
+        self._engine_group.addButton(self._ndl_radio, 1)
+        engine_row.addWidget(self._paddle_radio)
+        engine_row.addWidget(self._ndl_radio)
+        engine_row.addStretch()
+        sbox.addLayout(engine_row)
+
+        # DPI
+        dpi_row = QHBoxLayout()
+        dpi_lbl = QLabel("DPI")
+        dpi_lbl.setFixedWidth(80)
+        dpi_row.addWidget(dpi_lbl)
+        self._dpi_spin = QSpinBox()
+        self._dpi_spin.setRange(72, 600)
+        self._dpi_spin.setValue(300)
+        self._dpi_spin.setSuffix(" dpi")
+        self._dpi_spin.setFixedWidth(100)
+        dpi_row.addWidget(self._dpi_spin)
+        dpi_row.addStretch()
+        sbox.addLayout(dpi_row)
+
+        # Output dir
+        out_row = QHBoxLayout()
+        out_lbl = QLabel("出力先")
+        out_lbl.setFixedWidth(80)
+        out_row.addWidget(out_lbl)
+        self._output_edit = QLineEdit()
+        self._output_edit.setText(str(Path.home() / "ocr_output"))
+        self._output_edit.setPlaceholderText("出力フォルダパス")
+        out_row.addWidget(self._output_edit)
+        out_browse = QPushButton("参照")
+        out_browse.setFixedWidth(52)
+        out_browse.clicked.connect(self._browse_output)
+        out_row.addWidget(out_browse)
+        sbox.addLayout(out_row)
+
+        vbox.addWidget(settings)
+
+        # Log area
+        log_group = QGroupBox("ログ")
+        log_group.setObjectName("LogGroup")
+        log_vbox = QVBoxLayout(log_group)
+        self._log = QTextEdit()
+        self._log.setReadOnly(True)
+        self._log.setFont(QFont("Menlo", 11))
+        self._log.setMinimumHeight(160)
+        self._log.setObjectName("LogArea")
+        log_vbox.addWidget(self._log)
+        vbox.addWidget(log_group)
+
+        # Progress + Start button
+        footer = QVBoxLayout()
+        footer.setSpacing(8)
+
+        self._progress = QProgressBar()
+        self._progress.setRange(0, 0)
+        self._progress.setTextVisible(False)
+        self._progress.setFixedHeight(6)
+        self._progress.setVisible(False)
+        footer.addWidget(self._progress)
+
+        self._status_lbl = QLabel("")
+        self._status_lbl.setObjectName("StatusLabel")
+        self._status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        footer.addWidget(self._status_lbl)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        self._clear_btn = QPushButton("クリア")
+        self._clear_btn.setObjectName("ClearBtn")
+        self._clear_btn.setFixedWidth(80)
+        self._clear_btn.clicked.connect(self._clear_all)
+        btn_row.addWidget(self._clear_btn)
+
+        self._start_btn = QPushButton("OCR 開始")
+        self._start_btn.setObjectName("StartBtn")
+        self._start_btn.setFixedWidth(120)
+        self._start_btn.setFixedHeight(36)
+        self._start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._start_btn.clicked.connect(self._toggle_run)
+        btn_row.addWidget(self._start_btn)
+        footer.addLayout(btn_row)
+
+        vbox.addLayout(footer)
+
+    # ── File Management ──────────────────────────
+
+    def _add_files(self, paths: list[str]) -> None:
+        added = 0
+        for p in paths:
+            if p not in self._files:
+                self._files.append(p)
+                chip = FileChip(p)
+                chip.removed.connect(self._remove_file)
+                self._chips[p] = chip
+                self._chip_layout.addWidget(chip)
+                added += 1
+        if added:
+            self._empty_label.setVisible(False)
+        self._update_start_btn()
+
+    def _remove_file(self, path: str) -> None:
+        if path in self._files:
+            self._files.remove(path)
+        if path in self._chips:
+            chip = self._chips.pop(path)
+            self._chip_layout.removeWidget(chip)
+            chip.deleteLater()
+        if not self._files:
+            self._empty_label.setVisible(True)
+        self._update_start_btn()
+
+    def _clear_all(self) -> None:
+        for path in list(self._files):
+            self._remove_file(path)
+        self._log.clear()
+        self._status_lbl.setText("")
+
+    # ── Settings ─────────────────────────────────
+
+    def _browse_output(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "出力フォルダを選択", self._output_edit.text())
+        if d:
+            self._output_edit.setText(d)
+
+    def _selected_engine(self) -> str:
+        return "ndlocr" if self._ndl_radio.isChecked() else "paddleocr"
+
+    # ── Run Control ──────────────────────────────
+
+    def _toggle_run(self) -> None:
+        if self._running:
+            self._cancel()
+        else:
+            self._start()
+
+    def _start(self) -> None:
+        if not self._files:
+            QMessageBox.warning(self, "ファイル未選択", "処理するファイルを選択してください。")
+            return
+        out_dir = Path(self._output_edit.text().strip())
+        if not out_dir.parent.exists():
+            QMessageBox.warning(self, "出力先エラー", f"出力先の親ディレクトリが存在しません:\n{out_dir.parent}")
+            return
+
+        self._running = True
+        self._start_btn.setText("キャンセル")
+        self._start_btn.setObjectName("CancelBtn")
+        self._start_btn.style().unpolish(self._start_btn)
+        self._start_btn.style().polish(self._start_btn)
+        self._clear_btn.setEnabled(False)
+        self._progress.setVisible(True)
+        self._log.clear()
+        self._log_line(f"エンジン: {self._selected_engine()}  DPI: {self._dpi_spin.value()}")
+        self._log_line(f"出力先: {out_dir}")
+        self._log_line("─" * 50)
+
+        self._worker = OCRWorker(
+            files=[Path(p) for p in self._files],
+            engine=self._selected_engine(),
+            dpi=self._dpi_spin.value(),
+            output_dir=out_dir,
+            ocr_py=self.OCR_PY,
+        )
+        self._worker.progress_line.connect(self._log_line)
+        self._worker.file_started.connect(self._on_file_started)
+        self._worker.file_done.connect(self._on_file_done)
+        self._worker.all_done.connect(self._on_all_done)
+        self._worker.start()
+
+    def _cancel(self) -> None:
+        if self._worker:
+            self._worker.cancel()
+        self._log_line("── キャンセルしました ──")
+        self._finish_ui()
+
+    def _on_file_started(self, filepath: str, index: int) -> None:
+        total = len(self._files)
+        name = Path(filepath).name
+        self._status_lbl.setText(f"[{index}/{total}] {name} を処理中...")
+        self._log_line(f"\n▶ [{index}/{total}] {name}")
+
+    def _on_file_done(self, filepath: str, success: bool, message: str) -> None:
+        name = Path(filepath).name
+        mark = "✓" if success else "✗"
+        self._log_line(f"{mark} {name}  {message}")
+
+    def _on_all_done(self) -> None:
+        self._log_line("\n" + "─" * 50)
+        self._log_line("すべての処理が完了しました。")
+        self._status_lbl.setText("完了")
+        self._finish_ui()
+
+    def _finish_ui(self) -> None:
+        self._running = False
+        self._start_btn.setText("OCR 開始")
+        self._start_btn.setObjectName("StartBtn")
+        self._start_btn.style().unpolish(self._start_btn)
+        self._start_btn.style().polish(self._start_btn)
+        self._clear_btn.setEnabled(True)
+        self._progress.setVisible(False)
+
+    def _update_start_btn(self) -> None:
+        self._start_btn.setEnabled(bool(self._files))
+
+    def _log_line(self, text: str) -> None:
+        self._log.append(text)
+        sb = self._log.verticalScrollBar()
+        if sb:
+            sb.setValue(sb.maximum())
+
+    # ── Stylesheet ───────────────────────────────
+
+    def _apply_stylesheet(self) -> None:
+        # Detect system dark mode via palette
+        bg = self.palette().color(QPalette.ColorRole.Window)
+        is_dark = bg.lightness() < 128
+
+        if is_dark:
+            base_bg    = "#1e1e2e"
+            surface    = "#2a2a3e"
+            border     = "#44475a"
+            accent     = "#7c3aed"
+            accent_fg  = "#ffffff"
+            text_main  = "#e2e2e8"
+            text_muted = "#888899"
+            chip_bg    = "#353550"
+            log_bg     = "#141420"
+            cancel_bg  = "#dc2626"
+        else:
+            base_bg    = "#f5f5fa"
+            surface    = "#ffffff"
+            border     = "#d1d1dd"
+            accent     = "#6d28d9"
+            accent_fg  = "#ffffff"
+            text_main  = "#18181b"
+            text_muted = "#71717a"
+            chip_bg    = "#ede9fe"
+            log_bg     = "#f8f8fc"
+            cancel_bg  = "#ef4444"
+
+        self.setStyleSheet(f"""
+            QMainWindow, QWidget {{
+                background-color: {base_bg};
+                color: {text_main};
+                font-family: "Helvetica Neue", "Hiragino Sans", "Yu Gothic", sans-serif;
+            }}
+            QLabel#Title {{
+                color: {text_main};
+            }}
+            QGroupBox {{
+                border: 1px solid {border};
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 8px;
+                font-weight: bold;
+                font-size: 12px;
+                color: {text_muted};
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                left: 12px;
+                padding: 0 4px;
+            }}
+            QFrame#DropZone {{
+                border: 2px dashed {border};
+                border-radius: 12px;
+                background-color: {surface};
+            }}
+            QFrame#DropZone[hovering="true"] {{
+                border-color: {accent};
+                background-color: {"#2e2a4e" if is_dark else "#f0ebff"};
+            }}
+            QLabel#DropIcon {{
+                color: {accent};
+            }}
+            QPushButton#BrowseBtn {{
+                background-color: transparent;
+                color: {accent};
+                border: 1px solid {accent};
+                border-radius: 6px;
+                padding: 4px 14px;
+                font-size: 12px;
+            }}
+            QPushButton#BrowseBtn:hover {{
+                background-color: {accent};
+                color: {accent_fg};
+            }}
+            QScrollArea#ChipArea {{
+                border: 1px solid {border};
+                border-radius: 8px;
+                background-color: {surface};
+            }}
+            QWidget#ChipContainer {{
+                background-color: {surface};
+            }}
+            QFrame#FileChip {{
+                background-color: {chip_bg};
+                border: 1px solid {accent};
+                border-radius: 14px;
+                color: {accent};
+            }}
+            QLabel#EmptyHint {{
+                color: {text_muted};
+                font-size: 12px;
+            }}
+            QRadioButton, QCheckBox {{
+                spacing: 6px;
+                color: {text_main};
+            }}
+            QRadioButton::indicator, QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                border: 2px solid {border};
+                background: {surface};
+            }}
+            QRadioButton::indicator:checked {{
+                background: {accent};
+                border-color: {accent};
+            }}
+            QCheckBox::indicator {{
+                border-radius: 4px;
+            }}
+            QCheckBox::indicator:checked {{
+                background: {accent};
+                border-color: {accent};
+            }}
+            QLineEdit, QSpinBox, QComboBox {{
+                background-color: {surface};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 4px 8px;
+                color: {text_main};
+                selection-background-color: {accent};
+            }}
+            QLineEdit:focus, QSpinBox:focus {{
+                border-color: {accent};
+            }}
+            QPushButton {{
+                background-color: {surface};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 4px 12px;
+                color: {text_main};
+            }}
+            QPushButton:hover {{
+                border-color: {accent};
+                color: {accent};
+            }}
+            QPushButton#StartBtn {{
+                background-color: {accent};
+                color: {accent_fg};
+                border: none;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: bold;
+            }}
+            QPushButton#StartBtn:hover {{
+                background-color: {"#6d28d9" if not is_dark else "#8b5cf6"};
+                color: {accent_fg};
+            }}
+            QPushButton#StartBtn:disabled {{
+                background-color: {border};
+                color: {text_muted};
+            }}
+            QPushButton#CancelBtn {{
+                background-color: {cancel_bg};
+                color: #ffffff;
+                border: none;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: bold;
+            }}
+            QPushButton#ClearBtn {{
+                font-size: 12px;
+            }}
+            QProgressBar {{
+                border: none;
+                border-radius: 3px;
+                background-color: {border};
+            }}
+            QProgressBar::chunk {{
+                background-color: {accent};
+                border-radius: 3px;
+            }}
+            QTextEdit#LogArea {{
+                background-color: {log_bg};
+                border: 1px solid {border};
+                border-radius: 6px;
+                color: {text_main};
+                font-family: "Menlo", "Consolas", monospace;
+                font-size: 11px;
+            }}
+            QLabel#StatusLabel {{
+                color: {text_muted};
+                font-size: 12px;
+            }}
+            QScrollBar:vertical {{
+                width: 8px;
+                background: transparent;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {border};
+                border-radius: 4px;
+                min-height: 20px;
+            }}
+            QScrollBar:horizontal {{
+                height: 8px;
+                background: transparent;
+            }}
+            QScrollBar::handle:horizontal {{
+                background: {border};
+                border-radius: 4px;
+                min-width: 20px;
+            }}
+        """)
+        self._update_start_btn()
+
+
+def main() -> None:
+    app = QApplication(sys.argv)
+    app.setApplicationName("OCR Launcher")
+    app.setApplicationVersion("1.0.0")
+    win = MainWindow()
+    win.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

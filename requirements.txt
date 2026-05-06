@@ -5,3 +5,4 @@ Pillow
 openpyxl
 python-docx
 opencv-python
+PyQt6>=6.5
