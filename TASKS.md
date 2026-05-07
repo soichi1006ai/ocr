@@ -357,11 +357,11 @@
 ## T5.2: engines/hybrid_engine.py 実装
 
 **タスク**:
-- [ ] PaddleEngine と ClaudeEngine を内部で使用
-- [ ] フロー: Paddle で全体抽出 → confidence 評価 → 低信頼ブロックのみ Claude に再質問
-- [ ] 閾値 `confidence_threshold` をコンストラクタで受け取る（デフォルト 0.85）
-- [ ] 低信頼ブロックの画像領域を切り出して Claude に投入
-- [ ] 結果をマージして PageResult を返す
+- [x] PaddleEngine と ClaudeEngine を内部で使用
+- [x] フロー: Paddle で全体抽出 → confidence 評価 → 低信頼ブロックのみ Claude に再質問
+- [x] 閾値 `confidence_threshold` をコンストラクタで受け取る（デフォルト 0.85）
+- [x] 低信頼ブロックが含まれるページを Claude に再抽出（画像全体）
+- [x] 結果をマージして PageResult を返す
 
 **受け入れ基準**:
 - 暦表サンプルで Paddle 単独より精度が向上
@@ -372,10 +372,10 @@
 ## T5.3: tests/accuracy_eval.py — 精度評価フレームワーク
 
 **タスク**:
-- [ ] `tests/ground_truth/` に正解データを配置（暦表3件、台帳3件）
-- [ ] CER（Character Error Rate）計算ロジック
-- [ ] 構造化データの一致率計算（JSON diff ベース）
-- [ ] モード別精度比較レポート出力（Markdown 形式）
+- [x] `tests/ground_truth/` に正解データを配置（暦表3件、台帳3件）
+- [x] CER（Character Error Rate）計算ロジック
+- [x] 構造化データの一致率計算（JSON diff ベース）
+- [x] モード別精度比較レポート出力（Markdown / JSON 形式）
 - [ ] CI で自動実行（コスト発生するためマニュアル実行 or 月1回）
 
 **受け入れ基準**:

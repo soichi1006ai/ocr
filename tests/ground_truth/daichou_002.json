@@ -1,0 +1,9 @@
+{
+  "document_type": "daichou",
+  "date": "寛政3年10月",
+  "entries": [
+    {"id": 1, "person": "高橋甚兵衛", "item": "木綿反物五反", "amount": "金三両一分"},
+    {"id": 2, "person": "田中惣右衛門", "item": "油二斗", "amount": "銀三十匁"},
+    {"id": 3, "person": "渡辺庄兵衛", "item": "漆一樽", "amount": "金二両三分"}
+  ]
+}
