@@ -159,15 +159,36 @@ def extract_tables_claude(
 
 # ── 内部ヘルパー ──────────────────────────────────────
 
+_LIMIT_BYTES = 4 * 1024 * 1024   # 4 MB（Claude API 上限 5 MB に対して安全マージン）
+_MAX_SIDE    = 2000               # OCR精度を保ちつつサイズ削減
+
+
 def _b64_image(path: Path) -> tuple[str, str]:
-    media = {
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".tiff": "image/tiff",
-        ".tif": "image/tiff",
-    }.get(path.suffix.lower(), "image/png")
-    return base64.standard_b64encode(path.read_bytes()).decode(), media
+    """画像を base64 エンコードする。5MB超の場合はリサイズ + JPEG圧縮する。"""
+    raw = path.read_bytes()
+    if len(raw) <= _LIMIT_BYTES:
+        media = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".tiff": "image/tiff",
+            ".tif": "image/tiff",
+        }.get(path.suffix.lower(), "image/png")
+        return base64.standard_b64encode(raw).decode(), media
+
+    # 上限超過 → PIL でリサイズ＆JPEG圧縮
+    import io
+    from PIL import Image
+
+    img = Image.open(path).convert("RGB")
+    w, h = img.size
+    scale = min(_MAX_SIDE / max(w, h), 1.0)
+    if scale < 1.0:
+        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=88)
+    return base64.standard_b64encode(buf.getvalue()).decode(), "image/jpeg"
 
 
 def _infer_page_number(image_path: Path, *, fallback: int) -> int:
