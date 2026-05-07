@@ -38,6 +38,7 @@ class OCRWorker(QThread):
         dpi: int,
         output_dir: Path,
         ocr_py: Path,
+        spread: bool = False,
     ) -> None:
         super().__init__()
         self._files = files
@@ -45,6 +46,7 @@ class OCRWorker(QThread):
         self._dpi = dpi
         self._output_dir = output_dir
         self._ocr_py = ocr_py
+        self._spread = spread
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -66,6 +68,8 @@ class OCRWorker(QThread):
                 "--dpi",    str(self._dpi),
                 "--engine", self._engine,
             ]
+            if self._spread:
+                cmd.append("--spread")
             try:
                 proc = subprocess.Popen(
                     cmd,
@@ -305,6 +309,16 @@ class MainWindow(QMainWindow):
         dpi_row.addStretch()
         sbox.addLayout(dpi_row)
 
+        # 見開き分割
+        spread_row = QHBoxLayout()
+        spread_lbl = QLabel("見開き")
+        spread_lbl.setFixedWidth(80)
+        spread_row.addWidget(spread_lbl)
+        self._spread_check = QCheckBox("左右に分割して各ページを独立補正（見開きスキャン用）")
+        spread_row.addWidget(self._spread_check)
+        spread_row.addStretch()
+        sbox.addLayout(spread_row)
+
         # Output dir
         out_row = QHBoxLayout()
         out_lbl = QLabel("出力先")
@@ -447,6 +461,7 @@ class MainWindow(QMainWindow):
             dpi=self._dpi_spin.value(),
             output_dir=out_dir,
             ocr_py=self.OCR_PY,
+            spread=self._spread_check.isChecked(),
         )
         self._worker.progress_line.connect(self._log_line)
         self._worker.file_started.connect(self._on_file_started)

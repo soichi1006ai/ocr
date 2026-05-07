@@ -39,6 +39,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="paddleocr",
         help="OCR engine to use: paddleocr (default) or ndlocr (higher accuracy for historical Japanese)",
     )
+    parser.add_argument(
+        "--spread",
+        action="store_true",
+        default=False,
+        help="Split each page into left/right halves and deskew independently (for spread scans)",
+    )
     return parser
 
 
@@ -55,6 +61,11 @@ def main(argv: list[str] | None = None) -> int:
             dpi=args.dpi,
             pages=args.pages,
         )
+
+        if args.spread:
+            from image_preprocessor import split_spread_pages
+            image_paths = split_spread_pages(image_paths, pages_dir)
+            print(f"[spread: {len(image_paths)} half-pages]")
 
         print(f"[engine: {args.engine}]")
 
