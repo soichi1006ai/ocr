@@ -55,6 +55,15 @@ class OCRWorker(QThread):
         self._cancelled = True
 
     def run(self) -> None:
+        # poppler / homebrew のパスを確実に含める（デスクトップ起動時は PATH が限定的）
+        import os
+        env = os.environ.copy()
+        extra = ["/usr/local/bin", "/opt/homebrew/bin", "/opt/homebrew/sbin"]
+        existing = set(env.get("PATH", "").split(":"))
+        prepend = [p for p in extra if p not in existing]
+        if prepend:
+            env["PATH"] = ":".join(prepend) + ":" + env.get("PATH", "")
+
         for i, file_path in enumerate(self._files, start=1):
             if self._cancelled:
                 break
@@ -74,6 +83,7 @@ class OCRWorker(QThread):
                 cmd.append("--spread")
             if self._formats:
                 cmd += ["--formats"] + self._formats
+            self.progress_line.emit(f"実行: {' '.join(str(c) for c in cmd[-6:])}")
             try:
                 proc = subprocess.Popen(
                     cmd,
@@ -82,17 +92,19 @@ class OCRWorker(QThread):
                     text=True,
                     encoding="utf-8",
                     errors="replace",
+                    env=env,
+                    cwd=str(self._ocr_py.parent),
                 )
                 assert proc.stdout is not None
                 for line in proc.stdout:
                     line = line.rstrip()
-                    if line:
+                    if line and not line.startswith("[2026") and "ppocr DEBUG" not in line:
                         self.progress_line.emit(line)
                 proc.wait()
                 if proc.returncode == 0:
                     self.file_done.emit(str(file_path), True, f"→ {out_dir}")
                 else:
-                    self.file_done.emit(str(file_path), False, f"終了コード {proc.returncode}")
+                    self.file_done.emit(str(file_path), False, f"失敗 (終了コード {proc.returncode})")
             except Exception as exc:
                 self.file_done.emit(str(file_path), False, str(exc))
 

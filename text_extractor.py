@@ -56,7 +56,7 @@ class PaddleOCREngine:
                 "paddleocr is not installed. Run: pip install paddleocr==2.7.3"
             ) from exc
 
-        self._engine = PaddleOCR(lang=lang, use_angle_cls=use_angle_cls)
+        self._engine = PaddleOCR(lang=lang, use_angle_cls=use_angle_cls, show_log=False)
 
     def ocr(self, img: str, cls: bool = True):
         return self._engine.ocr(img, cls=cls)
