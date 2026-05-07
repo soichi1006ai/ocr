@@ -35,9 +35,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--engine",
-        choices=["paddleocr", "ndlocr"],
+        choices=["paddleocr", "ndlocr", "claude"],
         default="paddleocr",
-        help="OCR engine to use: paddleocr (default) or ndlocr (higher accuracy for historical Japanese)",
+        help="OCR engine: paddleocr (default) / ndlocr (historical Japanese) / claude (highest accuracy)",
+    )
+    parser.add_argument(
+        "--api-key",
+        default=None,
+        help="Anthropic API key for Claude engine (default: ANTHROPIC_API_KEY env var)",
     )
     parser.add_argument(
         "--spread",
@@ -76,7 +81,20 @@ def main(argv: list[str] | None = None) -> int:
 
         print(f"[engine: {args.engine}]")
 
-        if args.engine == "ndlocr":
+        if args.engine == "claude":
+            from claude_engine import ClaudeOCRError, extract_tables_claude, run_claude_ocr
+            api_key = args.api_key or None
+            ocr_batch = run_claude_ocr(
+                image_paths,
+                api_key=api_key,
+                on_progress=_print_progress,
+                on_error=_print_page_error,
+            )
+            if not ocr_batch.pages:
+                raise OCRProcessingError("Claude OCR failed for all pages.")
+            tables = extract_tables_claude(image_paths, api_key=api_key)
+            layout_batch = None
+        elif args.engine == "ndlocr":
             from ndlocr_engine import NDLOCRError, extract_tables_ndlocr, run_ndlocr
             ocr_batch = run_ndlocr(
                 image_paths,
@@ -86,6 +104,7 @@ def main(argv: list[str] | None = None) -> int:
             if not ocr_batch.pages:
                 raise OCRProcessingError("ndlocr-lite failed for all pages.")
             tables = extract_tables_ndlocr(image_paths)
+            layout_batch = None
         else:
             ocr_batch = extract_text_from_images(
                 image_paths,
@@ -125,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     if docx_path:
         print(f"Done: Word output written to {docx_path}")
 
-    if args.engine == "paddleocr":
+    if args.engine == "paddleocr" and layout_batch is not None:
         frame_candidates = [r for r in layout_batch.regions if r.region_type in {"frame_candidate", "table_frame_candidate"}]
         table_like_candidates = [r for r in frame_candidates if r.region_type == "table_frame_candidate"]
         if frame_candidates:

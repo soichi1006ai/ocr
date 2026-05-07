@@ -40,6 +40,7 @@ class OCRWorker(QThread):
         ocr_py: Path,
         spread: bool = False,
         formats: list[str] | None = None,
+        api_key: str = "",
     ) -> None:
         super().__init__()
         self._files = files
@@ -49,6 +50,7 @@ class OCRWorker(QThread):
         self._ocr_py = ocr_py
         self._spread = spread
         self._formats = formats or ["txt", "xlsx", "docx"]
+        self._api_key = api_key
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -83,6 +85,8 @@ class OCRWorker(QThread):
                 cmd.append("--spread")
             if self._formats:
                 cmd += ["--formats"] + self._formats
+            if self._api_key:
+                cmd += ["--api-key", self._api_key]
             self.progress_line.emit(f"実行: {' '.join(str(c) for c in cmd[-6:])}")
             try:
                 proc = subprocess.Popen(
@@ -301,15 +305,33 @@ class MainWindow(QMainWindow):
         engine_lbl.setFixedWidth(80)
         engine_row.addWidget(engine_lbl)
         self._engine_group = QButtonGroup(self)
-        self._paddle_radio = QRadioButton("PaddleOCR（通常）")
-        self._ndl_radio    = QRadioButton("NDLOCR（古典特化）")
+        self._paddle_radio = QRadioButton("PaddleOCR")
+        self._ndl_radio    = QRadioButton("NDLOCR（古典）")
+        self._claude_radio = QRadioButton("Claude（高精度）")
         self._paddle_radio.setChecked(True)
         self._engine_group.addButton(self._paddle_radio, 0)
         self._engine_group.addButton(self._ndl_radio, 1)
+        self._engine_group.addButton(self._claude_radio, 2)
         engine_row.addWidget(self._paddle_radio)
         engine_row.addWidget(self._ndl_radio)
+        engine_row.addWidget(self._claude_radio)
         engine_row.addStretch()
         sbox.addLayout(engine_row)
+
+        # API キー（Claude 選択時のみ表示）
+        self._apikey_row = QHBoxLayout()
+        apikey_lbl = QLabel("API Key")
+        apikey_lbl.setFixedWidth(80)
+        self._apikey_row.addWidget(apikey_lbl)
+        self._apikey_edit = QLineEdit()
+        self._apikey_edit.setPlaceholderText("sk-ant-... （空欄の場合は環境変数 ANTHROPIC_API_KEY を使用）")
+        self._apikey_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._apikey_row.addWidget(self._apikey_edit)
+        self._apikey_widget = QWidget()
+        self._apikey_widget.setLayout(self._apikey_row)
+        self._apikey_widget.setVisible(False)
+        sbox.addWidget(self._apikey_widget)
+        self._claude_radio.toggled.connect(self._apikey_widget.setVisible)
 
         # DPI
         dpi_row = QHBoxLayout()
@@ -456,7 +478,12 @@ class MainWindow(QMainWindow):
             self._output_edit.setText(d)
 
     def _selected_engine(self) -> str:
-        return "ndlocr" if self._ndl_radio.isChecked() else "paddleocr"
+        if self._claude_radio.isChecked(): return "claude"
+        if self._ndl_radio.isChecked():   return "ndlocr"
+        return "paddleocr"
+
+    def _selected_api_key(self) -> str:
+        return self._apikey_edit.text().strip()
 
     def _selected_formats(self) -> list[str]:
         fmt = []
@@ -505,6 +532,7 @@ class MainWindow(QMainWindow):
             ocr_py=self.OCR_PY,
             spread=self._spread_check.isChecked(),
             formats=self._selected_formats(),
+            api_key=self._selected_api_key(),
         )
         self._worker.progress_line.connect(self._log_line)
         self._worker.file_started.connect(self._on_file_started)

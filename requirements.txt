@@ -6,3 +6,4 @@ openpyxl
 python-docx
 opencv-python
 PyQt6>=6.5
+anthropic>=0.50
