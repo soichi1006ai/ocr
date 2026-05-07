@@ -344,9 +344,9 @@
 ## T5.1: PaddleOCR の信頼度取得
 
 **タスク**:
-- [ ] `paddle_engine.py` から各セル/行の confidence スコアを取得
-- [ ] `PageResult.blocks[].confidence` に保持
-- [ ] テスト: 信頼度が常に 0〜1 の範囲
+- [x] `paddle_engine.py` から各セル/行の confidence スコアを取得
+- [x] `PageResult.blocks[].confidence` に保持（行単位で 1 Block）
+- [x] テスト: 信頼度が常に 0〜1 の範囲
 
 **受け入れ基準**:
 - すべてのブロックに confidence が付与される
