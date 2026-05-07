@@ -45,6 +45,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Split each page into left/right halves and deskew independently (for spread scans)",
     )
+    parser.add_argument(
+        "--formats",
+        nargs="+",
+        choices=["txt", "xlsx", "docx"],
+        default=["txt", "xlsx", "docx"],
+        help="Output formats to generate (default: all)",
+    )
     return parser
 
 
@@ -98,9 +105,10 @@ def main(argv: list[str] | None = None) -> int:
             }
             tables = extract_tables(layout_batch.regions, image_paths=image_path_by_page)
 
-        result_path = write_text_results(ocr_batch.pages, output_dir / "result.txt")
-        workbook_path = write_tables_to_workbook(tables, output_dir / "tables.xlsx")
-        docx_path = write_docx_results(ocr_batch.pages, tables, output_dir / "result.docx")
+        fmt = set(args.formats)
+        result_path = write_text_results(ocr_batch.pages, output_dir / "result.txt") if "txt" in fmt else None
+        workbook_path = write_tables_to_workbook(tables, output_dir / "tables.xlsx") if "xlsx" in fmt else None
+        docx_path = write_docx_results(ocr_batch.pages, tables, output_dir / "result.docx") if "docx" in fmt else None
     except (FileNotFoundError, ValueError, PageSelectionError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -108,12 +116,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Processing failed: {exc}", file=sys.stderr)
         return 2
 
-    print(f"Done: text output written to {result_path}")
+    if result_path:
+        print(f"Done: text output written to {result_path}")
     if workbook_path is not None:
         print(f"Done: table output written to {workbook_path}")
-    else:
+    elif "xlsx" in set(args.formats):
         print("Warning: no tables detected; tables.xlsx was not created")
-    print(f"Done: Word output written to {docx_path}")
+    if docx_path:
+        print(f"Done: Word output written to {docx_path}")
 
     if args.engine == "paddleocr":
         frame_candidates = [r for r in layout_batch.regions if r.region_type in {"frame_candidate", "table_frame_candidate"}]

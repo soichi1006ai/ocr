@@ -39,6 +39,7 @@ class OCRWorker(QThread):
         output_dir: Path,
         ocr_py: Path,
         spread: bool = False,
+        formats: list[str] | None = None,
     ) -> None:
         super().__init__()
         self._files = files
@@ -47,6 +48,7 @@ class OCRWorker(QThread):
         self._output_dir = output_dir
         self._ocr_py = ocr_py
         self._spread = spread
+        self._formats = formats or ["txt", "xlsx", "docx"]
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -70,6 +72,8 @@ class OCRWorker(QThread):
             ]
             if self._spread:
                 cmd.append("--spread")
+            if self._formats:
+                cmd += ["--formats"] + self._formats
             try:
                 proc = subprocess.Popen(
                     cmd,
@@ -334,6 +338,22 @@ class MainWindow(QMainWindow):
         out_row.addWidget(out_browse)
         sbox.addLayout(out_row)
 
+        # 出力形式
+        fmt_row = QHBoxLayout()
+        fmt_lbl = QLabel("出力形式")
+        fmt_lbl.setFixedWidth(80)
+        fmt_row.addWidget(fmt_lbl)
+        self._fmt_txt  = QCheckBox("TXT")
+        self._fmt_xlsx = QCheckBox("Excel (xlsx)")
+        self._fmt_docx = QCheckBox("Word (docx)")
+        self._fmt_txt.setChecked(True)
+        self._fmt_xlsx.setChecked(True)
+        self._fmt_docx.setChecked(True)
+        for cb in (self._fmt_txt, self._fmt_xlsx, self._fmt_docx):
+            fmt_row.addWidget(cb)
+        fmt_row.addStretch()
+        sbox.addLayout(fmt_row)
+
         vbox.addWidget(settings)
 
         # Log area
@@ -426,6 +446,13 @@ class MainWindow(QMainWindow):
     def _selected_engine(self) -> str:
         return "ndlocr" if self._ndl_radio.isChecked() else "paddleocr"
 
+    def _selected_formats(self) -> list[str]:
+        fmt = []
+        if self._fmt_txt.isChecked():  fmt.append("txt")
+        if self._fmt_xlsx.isChecked(): fmt.append("xlsx")
+        if self._fmt_docx.isChecked(): fmt.append("docx")
+        return fmt
+
     # ── Run Control ──────────────────────────────
 
     def _toggle_run(self) -> None:
@@ -437,6 +464,9 @@ class MainWindow(QMainWindow):
     def _start(self) -> None:
         if not self._files:
             QMessageBox.warning(self, "ファイル未選択", "処理するファイルを選択してください。")
+            return
+        if not self._selected_formats():
+            QMessageBox.warning(self, "出力形式未選択", "出力形式を1つ以上選択してください。")
             return
         out_dir = Path(self._output_edit.text().strip())
         if not out_dir.parent.exists():
@@ -462,6 +492,7 @@ class MainWindow(QMainWindow):
             output_dir=out_dir,
             ocr_py=self.OCR_PY,
             spread=self._spread_check.isChecked(),
+            formats=self._selected_formats(),
         )
         self._worker.progress_line.connect(self._log_line)
         self._worker.file_started.connect(self._on_file_started)
