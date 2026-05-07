@@ -41,6 +41,9 @@ class OCRWorker(QThread):
         spread: bool = False,
         formats: list[str] | None = None,
         api_key: str = "",
+        document_type: str = "auto",
+        model: str = "",
+        confidence_threshold: float = 0.85,
     ) -> None:
         super().__init__()
         self._files = files
@@ -51,6 +54,9 @@ class OCRWorker(QThread):
         self._spread = spread
         self._formats = formats or ["txt", "xlsx", "docx"]
         self._api_key = api_key
+        self._document_type = document_type
+        self._model = model
+        self._confidence_threshold = confidence_threshold
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -87,6 +93,12 @@ class OCRWorker(QThread):
                 cmd += ["--formats"] + self._formats
             if self._api_key:
                 cmd += ["--api-key", self._api_key]
+            if self._document_type != "auto":
+                cmd += ["--document-type", self._document_type]
+            if self._model:
+                cmd += ["--model", self._model]
+            if self._engine == "hybrid":
+                cmd += ["--confidence-threshold", str(self._confidence_threshold)]
             self.progress_line.emit(f"実行: {' '.join(str(c) for c in cmd[-6:])}")
             try:
                 proc = subprocess.Popen(
@@ -244,6 +256,7 @@ class MainWindow(QMainWindow):
         self._chips: dict[str, FileChip] = {}
         self._worker: Optional[OCRWorker] = None
         self._running = False
+        self._completed = 0
 
         self._build_ui()
         self._apply_stylesheet()
@@ -299,27 +312,82 @@ class MainWindow(QMainWindow):
         sbox = QVBoxLayout(settings)
         sbox.setSpacing(10)
 
-        # Engine
-        engine_row = QHBoxLayout()
-        engine_lbl = QLabel("エンジン")
-        engine_lbl.setFixedWidth(80)
-        engine_row.addWidget(engine_lbl)
-        self._engine_group = QButtonGroup(self)
-        self._paddle_radio = QRadioButton("PaddleOCR")
-        self._ndl_radio    = QRadioButton("NDLOCR（古典）")
-        self._claude_radio = QRadioButton("Claude（高精度）")
-        self._paddle_radio.setChecked(True)
-        self._engine_group.addButton(self._paddle_radio, 0)
-        self._engine_group.addButton(self._ndl_radio, 1)
-        self._engine_group.addButton(self._claude_radio, 2)
-        engine_row.addWidget(self._paddle_radio)
-        engine_row.addWidget(self._ndl_radio)
-        engine_row.addWidget(self._claude_radio)
-        engine_row.addStretch()
-        sbox.addLayout(engine_row)
+        # モード
+        mode_row = QHBoxLayout()
+        mode_lbl = QLabel("モード")
+        mode_lbl.setFixedWidth(80)
+        mode_row.addWidget(mode_lbl)
+        self._mode_group = QButtonGroup(self)
+        self._offline_radio = QRadioButton("オフライン")
+        self._hybrid_radio  = QRadioButton("ハイブリッド ★")
+        self._cloud_radio   = QRadioButton("精度")
+        self._hybrid_radio.setChecked(True)
+        self._mode_group.addButton(self._offline_radio, 0)
+        self._mode_group.addButton(self._hybrid_radio,  1)
+        self._mode_group.addButton(self._cloud_radio,   2)
+        for r in (self._offline_radio, self._hybrid_radio, self._cloud_radio):
+            mode_row.addWidget(r)
+        mode_row.addStretch()
+        sbox.addLayout(mode_row)
 
-        # API キー（Claude 選択時のみ表示）
-        self._apikey_row = QHBoxLayout()
+        # 文書種別
+        doctype_row = QHBoxLayout()
+        doctype_lbl = QLabel("文書種別")
+        doctype_lbl.setFixedWidth(80)
+        doctype_row.addWidget(doctype_lbl)
+        self._doctype_group = QButtonGroup(self)
+        self._dt_auto    = QRadioButton("自動")
+        self._dt_koyomi  = QRadioButton("暦表")
+        self._dt_daichou = QRadioButton("台帳")
+        self._dt_honbun  = QRadioButton("本文")
+        self._dt_auto.setChecked(True)
+        for i, r in enumerate((self._dt_auto, self._dt_koyomi, self._dt_daichou, self._dt_honbun)):
+            self._doctype_group.addButton(r, i)
+            doctype_row.addWidget(r)
+        doctype_row.addStretch()
+        sbox.addLayout(doctype_row)
+
+        # 信頼度閾値（ハイブリッドモード時のみ表示）
+        from PyQt6.QtWidgets import QSlider
+        self._threshold_widget = QWidget()
+        threshold_row = QHBoxLayout(self._threshold_widget)
+        threshold_row.setContentsMargins(0, 0, 0, 0)
+        threshold_lbl = QLabel("信頼度閾値")
+        threshold_lbl.setFixedWidth(80)
+        threshold_row.addWidget(threshold_lbl)
+        self._threshold_slider = QSlider(Qt.Orientation.Horizontal)
+        self._threshold_slider.setRange(50, 99)
+        self._threshold_slider.setValue(85)
+        self._threshold_slider.setFixedWidth(160)
+        self._threshold_val_lbl = QLabel("0.85")
+        self._threshold_val_lbl.setFixedWidth(36)
+        self._threshold_slider.valueChanged.connect(
+            lambda v: self._threshold_val_lbl.setText(f"{v/100:.2f}")
+        )
+        threshold_row.addWidget(self._threshold_slider)
+        threshold_row.addWidget(self._threshold_val_lbl)
+        threshold_row.addStretch()
+        sbox.addWidget(self._threshold_widget)
+
+        # モデル選択（精度モード時のみ表示）
+        self._model_widget = QWidget()
+        model_row = QHBoxLayout(self._model_widget)
+        model_row.setContentsMargins(0, 0, 0, 0)
+        model_lbl = QLabel("モデル")
+        model_lbl.setFixedWidth(80)
+        model_row.addWidget(model_lbl)
+        self._model_combo = QComboBox()
+        self._model_combo.addItem("Opus 4.7（高精度）",   "claude-opus-4-7")
+        self._model_combo.addItem("Sonnet 4.6（高速）", "claude-sonnet-4-6")
+        self._model_combo.setFixedWidth(200)
+        model_row.addWidget(self._model_combo)
+        model_row.addStretch()
+        sbox.addWidget(self._model_widget)
+
+        # API キー（ハイブリッド or 精度モード時のみ表示）
+        self._apikey_widget = QWidget()
+        self._apikey_row = QHBoxLayout(self._apikey_widget)
+        self._apikey_row.setContentsMargins(0, 0, 0, 0)
         apikey_lbl = QLabel("API Key")
         apikey_lbl.setFixedWidth(80)
         self._apikey_row.addWidget(apikey_lbl)
@@ -327,11 +395,11 @@ class MainWindow(QMainWindow):
         self._apikey_edit.setPlaceholderText("sk-ant-... （空欄の場合は環境変数 ANTHROPIC_API_KEY を使用）")
         self._apikey_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self._apikey_row.addWidget(self._apikey_edit)
-        self._apikey_widget = QWidget()
-        self._apikey_widget.setLayout(self._apikey_row)
-        self._apikey_widget.setVisible(False)
         sbox.addWidget(self._apikey_widget)
-        self._claude_radio.toggled.connect(self._apikey_widget.setVisible)
+
+        # モード切替で表示を更新
+        self._mode_group.buttonToggled.connect(lambda *_: self._update_mode_ui())
+        self._update_mode_ui()
 
         # DPI
         dpi_row = QHBoxLayout()
@@ -407,9 +475,11 @@ class MainWindow(QMainWindow):
         footer.setSpacing(8)
 
         self._progress = QProgressBar()
-        self._progress.setRange(0, 0)
-        self._progress.setTextVisible(False)
-        self._progress.setFixedHeight(6)
+        self._progress.setRange(0, 1)
+        self._progress.setValue(0)
+        self._progress.setTextVisible(True)
+        self._progress.setFormat("%v / %m ファイル")
+        self._progress.setFixedHeight(18)
         self._progress.setVisible(False)
         footer.addWidget(self._progress)
 
@@ -418,6 +488,14 @@ class MainWindow(QMainWindow):
         self._status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         footer.addWidget(self._status_lbl)
 
+        # インラインバリデーションエラー表示
+        self._validation_lbl = QLabel("")
+        self._validation_lbl.setObjectName("ValidationLabel")
+        self._validation_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._validation_lbl.setWordWrap(True)
+        self._validation_lbl.setVisible(False)
+        footer.addWidget(self._validation_lbl)
+
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         self._clear_btn = QPushButton("クリア")
@@ -425,6 +503,15 @@ class MainWindow(QMainWindow):
         self._clear_btn.setFixedWidth(80)
         self._clear_btn.clicked.connect(self._clear_all)
         btn_row.addWidget(self._clear_btn)
+
+        self._open_btn = QPushButton("結果を開く")
+        self._open_btn.setObjectName("OpenBtn")
+        self._open_btn.setFixedWidth(100)
+        self._open_btn.setFixedHeight(36)
+        self._open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._open_btn.clicked.connect(self._open_output)
+        self._open_btn.setVisible(False)
+        btn_row.addWidget(self._open_btn)
 
         self._start_btn = QPushButton("OCR 開始")
         self._start_btn.setObjectName("StartBtn")
@@ -477,10 +564,30 @@ class MainWindow(QMainWindow):
         if d:
             self._output_edit.setText(d)
 
+    def _update_mode_ui(self) -> None:
+        is_hybrid  = self._hybrid_radio.isChecked()
+        is_cloud   = self._cloud_radio.isChecked()
+        is_offline = self._offline_radio.isChecked()
+        self._threshold_widget.setVisible(is_hybrid)
+        self._model_widget.setVisible(is_cloud)
+        self._apikey_widget.setVisible(not is_offline)
+
     def _selected_engine(self) -> str:
-        if self._claude_radio.isChecked(): return "claude"
-        if self._ndl_radio.isChecked():   return "ndlocr"
+        if self._cloud_radio.isChecked():  return "claude"
+        if self._hybrid_radio.isChecked(): return "hybrid"
         return "paddleocr"
+
+    def _selected_document_type(self) -> str:
+        mapping = {0: "auto", 1: "koyomi", 2: "daichou", 3: "honbun"}
+        return mapping.get(self._doctype_group.checkedId(), "auto")
+
+    def _selected_model(self) -> str:
+        if self._cloud_radio.isChecked():
+            return self._model_combo.currentData() or ""
+        return ""
+
+    def _selected_confidence(self) -> float:
+        return self._threshold_slider.value() / 100.0
 
     def _selected_api_key(self) -> str:
         return self._apikey_edit.text().strip()
@@ -500,39 +607,81 @@ class MainWindow(QMainWindow):
         else:
             self._start()
 
+    def _show_validation_error(self, msg: str) -> None:
+        self._validation_lbl.setText(f"⚠ {msg}")
+        self._validation_lbl.setVisible(True)
+
+    def _clear_validation_error(self) -> None:
+        self._validation_lbl.setVisible(False)
+        self._validation_lbl.setText("")
+
+    def _estimate_cost(self, engine: str, n_files: int) -> str:
+        """クラウドAPIの概算コストを返す（参考値）"""
+        # 1画像あたりの概算トークン数（入力1600 + 出力200）
+        tokens_per_image = 1800
+        if engine == "claude":
+            model = self._selected_model()
+            # $/MTok: Opus 4.7=15, Sonnet 4.6=3
+            price_per_mtok = 15.0 if "opus" in model else 3.0
+            cost_usd = n_files * tokens_per_image / 1_000_000 * price_per_mtok
+        elif engine == "hybrid":
+            # Claude 使用率を約35%と仮定、Sonnet相当
+            cost_usd = n_files * 0.35 * tokens_per_image / 1_000_000 * 3.0
+        else:
+            return ""
+        return f"推定 API コスト: ~${cost_usd:.3f} USD（{n_files} ページ、参考値）"
+
     def _start(self) -> None:
+        self._clear_validation_error()
         if not self._files:
-            QMessageBox.warning(self, "ファイル未選択", "処理するファイルを選択してください。")
+            self._show_validation_error("処理するファイルを選択してください。")
             return
         if not self._selected_formats():
-            QMessageBox.warning(self, "出力形式未選択", "出力形式を1つ以上選択してください。")
+            self._show_validation_error("出力形式を1つ以上選択してください。")
             return
         out_dir = Path(self._output_edit.text().strip())
         if not out_dir.parent.exists():
-            QMessageBox.warning(self, "出力先エラー", f"出力先の親ディレクトリが存在しません:\n{out_dir.parent}")
+            self._show_validation_error(f"出力先の親ディレクトリが存在しません: {out_dir.parent}")
             return
 
         self._running = True
+        self._completed = 0
+        self._open_btn.setVisible(False)
         self._start_btn.setText("キャンセル")
         self._start_btn.setObjectName("CancelBtn")
         self._start_btn.style().unpolish(self._start_btn)
         self._start_btn.style().polish(self._start_btn)
         self._clear_btn.setEnabled(False)
+        total = len(self._files)
+        self._progress.setRange(0, total)
+        self._progress.setValue(0)
         self._progress.setVisible(True)
         self._log.clear()
-        self._log_line(f"エンジン: {self._selected_engine()}  DPI: {self._dpi_spin.value()}")
+        engine = self._selected_engine()
+        doc_type = self._selected_document_type()
+        self._log_line(f"モード: {engine}  文書種別: {doc_type}  DPI: {self._dpi_spin.value()}")
+        if engine == "hybrid":
+            self._log_line(f"信頼度閾値: {self._selected_confidence():.2f}")
+        if engine in ("claude", "hybrid"):
+            self._log_line(f"モデル: {self._selected_model() or 'Sonnet 4.6'}")
+            cost_str = self._estimate_cost(engine, total)
+            if cost_str:
+                self._log_line(cost_str)
         self._log_line(f"出力先: {out_dir}")
         self._log_line("─" * 50)
 
         self._worker = OCRWorker(
             files=[Path(p) for p in self._files],
-            engine=self._selected_engine(),
+            engine=engine,
             dpi=self._dpi_spin.value(),
             output_dir=out_dir,
             ocr_py=self.OCR_PY,
             spread=self._spread_check.isChecked(),
             formats=self._selected_formats(),
             api_key=self._selected_api_key(),
+            document_type=doc_type,
+            model=self._selected_model(),
+            confidence_threshold=self._selected_confidence(),
         )
         self._worker.progress_line.connect(self._log_line)
         self._worker.file_started.connect(self._on_file_started)
@@ -556,11 +705,14 @@ class MainWindow(QMainWindow):
         name = Path(filepath).name
         mark = "✓" if success else "✗"
         self._log_line(f"{mark} {name}  {message}")
+        self._completed += 1
+        self._progress.setValue(self._completed)
 
     def _on_all_done(self) -> None:
         self._log_line("\n" + "─" * 50)
         self._log_line("すべての処理が完了しました。")
-        self._status_lbl.setText("完了")
+        self._status_lbl.setText("完了 ✓")
+        self._open_btn.setVisible(True)
         self._finish_ui()
 
     def _finish_ui(self) -> None:
@@ -571,6 +723,11 @@ class MainWindow(QMainWindow):
         self._start_btn.style().polish(self._start_btn)
         self._clear_btn.setEnabled(True)
         self._progress.setVisible(False)
+
+    def _open_output(self) -> None:
+        out_dir = Path(self._output_edit.text().strip())
+        import subprocess as _sp
+        _sp.Popen(["open", str(out_dir)])
 
     def _update_start_btn(self) -> None:
         self._start_btn.setEnabled(bool(self._files))
@@ -589,25 +746,27 @@ class MainWindow(QMainWindow):
         is_dark = bg.lightness() < 128
 
         if is_dark:
-            base_bg    = "#1e1e2e"
-            surface    = "#2a2a3e"
-            border     = "#44475a"
-            accent     = "#7c3aed"
-            accent_fg  = "#ffffff"
-            text_main  = "#e2e2e8"
-            text_muted = "#888899"
-            chip_bg    = "#353550"
-            log_bg     = "#141420"
-            cancel_bg  = "#dc2626"
+            base_bg      = "#1e1e2e"
+            surface      = "#2a2a3e"
+            border       = "#44475a"
+            accent       = "#7c3aed"
+            accent_hover = "#6d28d9"
+            accent_fg    = "#ffffff"
+            text_main    = "#e2e2e8"
+            text_muted   = "#888899"
+            chip_bg      = "#353550"
+            log_bg       = "#141420"
+            cancel_bg    = "#dc2626"
         else:
-            base_bg    = "#f5f5fa"
-            surface    = "#ffffff"
-            border     = "#d1d1dd"
-            accent     = "#6d28d9"
-            accent_fg  = "#ffffff"
-            text_main  = "#18181b"
-            text_muted = "#71717a"
-            chip_bg    = "#ede9fe"
+            base_bg      = "#f5f5fa"
+            surface      = "#ffffff"
+            border       = "#d1d1dd"
+            accent       = "#6d28d9"
+            accent_hover = "#5b21b6"
+            accent_fg    = "#ffffff"
+            text_main    = "#18181b"
+            text_muted   = "#71717a"
+            chip_bg      = "#ede9fe"
             log_bg     = "#f8f8fc"
             cancel_bg  = "#ef4444"
 
@@ -748,10 +907,24 @@ class MainWindow(QMainWindow):
             QPushButton#ClearBtn {{
                 font-size: 12px;
             }}
-            QProgressBar {{
+            QPushButton#OpenBtn {{
+                background-color: {accent};
+                color: #ffffff;
                 border: none;
-                border-radius: 3px;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: bold;
+            }}
+            QPushButton#OpenBtn:hover {{
+                background-color: {accent_hover};
+            }}
+            QProgressBar {{
+                border: 1px solid {border};
+                border-radius: 4px;
                 background-color: {border};
+                text-align: center;
+                font-size: 11px;
+                color: {text_main};
             }}
             QProgressBar::chunk {{
                 background-color: {accent};
@@ -768,6 +941,14 @@ class MainWindow(QMainWindow):
             QLabel#StatusLabel {{
                 color: {text_muted};
                 font-size: 12px;
+            }}
+            QLabel#ValidationLabel {{
+                color: #e05555;
+                font-size: 12px;
+                padding: 4px 8px;
+                border: 1px solid #e05555;
+                border-radius: 4px;
+                background-color: rgba(224, 85, 85, 0.08);
             }}
             QScrollBar:vertical {{
                 width: 8px;

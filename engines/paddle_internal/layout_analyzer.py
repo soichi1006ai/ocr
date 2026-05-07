@@ -1,0 +1,147 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Optional, Protocol, Sequence
+
+from engines.paddle_internal.frame_detector import detect_frame_candidates
+
+
+class LayoutAnalyzerEngine(Protocol):
+    def __call__(self, img: str):
+        ...
+
+
+ErrorCallback = Callable[[int, Path, Exception], None]
+
+
+@dataclass(frozen=True)
+class LayoutRegion:
+    page_number: int
+    region_type: str
+    bbox: list[int] | list[float] | None
+    raw: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class LayoutPageError:
+    page_number: int
+    image_path: Path
+    error_message: str
+
+
+@dataclass(frozen=True)
+class LayoutBatchResult:
+    regions: list[LayoutRegion]
+    errors: list[LayoutPageError]
+
+
+class LayoutAnalysisError(Exception):
+    """Raised when page layout analysis fails."""
+
+
+class FrameDetectorEngine:
+    """Layout engine using local frame/table detection (no external DL model required).
+
+    Uses frame_detector.detect_frame_candidates to find ruled frames and
+    classify them as table-like based on line density and intersections.
+    This replaces PPStructure, which required PaddleOCR and was incompatible
+    with Python 3.13 / paddlepaddle availability constraints.
+    """
+
+    def __call__(self, img: str):
+        return []  # raw structural regions; frame candidates are added separately
+
+
+def analyze_page_layout(
+    image_path: str | Path,
+    page_number: int,
+    *,
+    engine: Optional[LayoutAnalyzerEngine] = None,
+) -> list[LayoutRegion]:
+    path = Path(image_path).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Image file not found: {path}")
+
+    analyzer = engine or FrameDetectorEngine()
+    try:
+        raw_regions = analyzer(str(path))
+    except Exception as exc:
+        raise LayoutAnalysisError(f"Layout analysis failed for image: {path}") from exc
+
+    regions: list[LayoutRegion] = []
+    for raw in raw_regions or []:
+        if not isinstance(raw, dict):
+            continue
+        regions.append(
+            LayoutRegion(
+                page_number=page_number,
+                region_type=str(raw.get("type", "unknown")),
+                bbox=raw.get("bbox"),
+                raw=raw,
+            )
+        )
+
+    for candidate in detect_frame_candidates(path):
+        regions.append(
+            LayoutRegion(
+                page_number=page_number,
+                region_type=("table_frame_candidate" if candidate.is_table_like else "frame_candidate"),
+                bbox=candidate.bbox,
+                raw={
+                    "type": "table_frame_candidate" if candidate.is_table_like else "frame_candidate",
+                    "bbox": candidate.bbox,
+                    "frame": {
+                        "score": candidate.score,
+                        "horizontalLineRatio": candidate.horizontal_line_ratio,
+                        "verticalLineRatio": candidate.vertical_line_ratio,
+                        "intersections": candidate.intersections,
+                        "isTableLike": candidate.is_table_like,
+                    },
+                },
+            )
+        )
+    return regions
+
+
+def analyze_document_layout(
+    image_paths: Sequence[str | Path],
+    *,
+    engine: Optional[LayoutAnalyzerEngine] = None,
+    on_error: Optional[ErrorCallback] = None,
+) -> LayoutBatchResult:
+    analyzer = engine or FrameDetectorEngine()
+    regions: list[LayoutRegion] = []
+    errors: list[LayoutPageError] = []
+
+    for index, image_path in enumerate(image_paths, start=1):
+        resolved_path = Path(image_path).expanduser().resolve()
+        page_number = _infer_page_number(resolved_path, fallback=index)
+        try:
+            page_regions = analyze_page_layout(
+                resolved_path,
+                page_number,
+                engine=analyzer,
+            )
+        except Exception as exc:
+            page_error = LayoutPageError(
+                page_number=page_number,
+                image_path=resolved_path,
+                error_message=str(exc),
+            )
+            errors.append(page_error)
+            if on_error is not None:
+                on_error(page_number, resolved_path, exc)
+        else:
+            regions.extend(page_regions)
+
+    return LayoutBatchResult(regions=regions, errors=errors)
+
+
+def _infer_page_number(image_path: Path, *, fallback: int) -> int:
+    stem = image_path.stem
+    if stem.startswith("page_"):
+        suffix = stem.removeprefix("page_")
+        if suffix.isdigit():
+            return int(suffix)
+    return fallback
