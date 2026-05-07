@@ -1,0 +1,126 @@
+{
+  "version": "1.0",
+  "description": "九星（一白〜九紫）暦表OCR補正用",
+  "items": [
+    {
+      "index": 1,
+      "kanji": "一白",
+      "full_name": "一白水星",
+      "yomi": "いっぱく",
+      "full_yomi": "いっぱくすいせい",
+      "element": "水",
+      "direction": "北",
+      "color": "白",
+      "common_variants": ["一白水星", "一白"],
+      "common_misreads": ["一自","一曰","一日"]
+    },
+    {
+      "index": 2,
+      "kanji": "二黒",
+      "full_name": "二黒土星",
+      "yomi": "じこく",
+      "full_yomi": "じこくどせい",
+      "element": "土",
+      "direction": "南西",
+      "color": "黒",
+      "common_variants": ["二黒土星", "二黒", "二黑土星", "二黑"],
+      "common_misreads": ["二黒","二里","二里"]
+    },
+    {
+      "index": 3,
+      "kanji": "三碧",
+      "full_name": "三碧木星",
+      "yomi": "さんぺき",
+      "full_yomi": "さんぺきもくせい",
+      "element": "木",
+      "direction": "東",
+      "color": "碧",
+      "common_variants": ["三碧木星", "三碧"],
+      "common_misreads": ["三碧","三壁","三璧"]
+    },
+    {
+      "index": 4,
+      "kanji": "四緑",
+      "full_name": "四緑木星",
+      "yomi": "しろく",
+      "full_yomi": "しろくもくせい",
+      "element": "木",
+      "direction": "東南",
+      "color": "緑",
+      "common_variants": ["四緑木星", "四緑", "四綠木星", "四綠"],
+      "common_misreads": ["四縁","四緣","四録"]
+    },
+    {
+      "index": 5,
+      "kanji": "五黄",
+      "full_name": "五黄土星",
+      "yomi": "ごおう",
+      "full_yomi": "ごおうどせい",
+      "element": "土",
+      "direction": "中央",
+      "color": "黄",
+      "common_variants": ["五黄土星", "五黄", "五黃土星", "五黃"],
+      "common_misreads": ["五責","五貴","五着"]
+    },
+    {
+      "index": 6,
+      "kanji": "六白",
+      "full_name": "六白金星",
+      "yomi": "ろっぱく",
+      "full_yomi": "ろっぱくきんせい",
+      "element": "金",
+      "direction": "北西",
+      "color": "白",
+      "common_variants": ["六白金星", "六白"],
+      "common_misreads": ["六自","六曰","六日"]
+    },
+    {
+      "index": 7,
+      "kanji": "七赤",
+      "full_name": "七赤金星",
+      "yomi": "しちせき",
+      "full_yomi": "しちせききんせい",
+      "element": "金",
+      "direction": "西",
+      "color": "赤",
+      "common_variants": ["七赤金星", "七赤"],
+      "common_misreads": ["七亦","七示","七示"]
+    },
+    {
+      "index": 8,
+      "kanji": "八白",
+      "full_name": "八白土星",
+      "yomi": "はっぱく",
+      "full_yomi": "はっぱくどせい",
+      "element": "土",
+      "direction": "北東",
+      "color": "白",
+      "common_variants": ["八白土星", "八白"],
+      "common_misreads": ["八自","八曰","八日"]
+    },
+    {
+      "index": 9,
+      "kanji": "九紫",
+      "full_name": "九紫火星",
+      "yomi": "きゅうし",
+      "full_yomi": "きゅうしかせい",
+      "element": "火",
+      "direction": "南",
+      "color": "紫",
+      "common_variants": ["九紫火星", "九紫"],
+      "common_misreads": ["九柴","九染","九紫"]
+    }
+  ],
+  "weekday_elements": {
+    "description": "七曜と五行の対応（暦表での表記）",
+    "items": [
+      {"weekday": "日", "yomi": "にち", "element": "火", "heavenly_body": "太陽"},
+      {"weekday": "月", "yomi": "げつ", "element": "水", "heavenly_body": "月"},
+      {"weekday": "火", "yomi": "か",   "element": "火", "heavenly_body": "火星"},
+      {"weekday": "水", "yomi": "すい", "element": "水", "heavenly_body": "水星"},
+      {"weekday": "木", "yomi": "もく", "element": "木", "heavenly_body": "木星"},
+      {"weekday": "金", "yomi": "きん", "element": "金", "heavenly_body": "金星"},
+      {"weekday": "土", "yomi": "ど",   "element": "土", "heavenly_body": "土星"}
+    ]
+  }
+}

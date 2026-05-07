@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "kyuusei.schema.json",
+  "title": "KyuuseiKnowledge",
+  "type": "object",
+  "required": ["version", "description", "items"],
+  "additionalProperties": false,
+  "properties": {
+    "version":     { "type": "string" },
+    "description": { "type": "string" },
+    "items": {
+      "type": "array",
+      "minItems": 9,
+      "maxItems": 9,
+      "items": { "$ref": "#/definitions/KyuuseiEntry" }
+    },
+    "weekday_elements": {
+      "type": "object",
+      "required": ["description", "items"],
+      "properties": {
+        "description": { "type": "string" },
+        "items": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "items": { "$ref": "#/definitions/WeekdayEntry" }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "KyuuseiEntry": {
+      "type": "object",
+      "required": ["index", "kanji", "full_name", "yomi", "full_yomi", "element", "direction", "color", "common_variants", "common_misreads"],
+      "additionalProperties": false,
+      "properties": {
+        "index":    { "type": "integer", "minimum": 1, "maximum": 9 },
+        "kanji":    { "type": "string", "minLength": 2, "maxLength": 2 },
+        "full_name":  { "type": "string" },
+        "yomi":     { "type": "string" },
+        "full_yomi":  { "type": "string" },
+        "element":  { "type": "string", "enum": ["木", "火", "土", "金", "水"] },
+        "direction": { "type": "string" },
+        "color":    { "type": "string" },
+        "common_variants":  { "type": "array", "items": { "type": "string" } },
+        "common_misreads":  { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "WeekdayEntry": {
+      "type": "object",
+      "required": ["weekday", "yomi", "element", "heavenly_body"],
+      "additionalProperties": false,
+      "properties": {
+        "weekday":       { "type": "string", "minLength": 1, "maxLength": 1 },
+        "yomi":          { "type": "string" },
+        "element":       { "type": "string", "enum": ["木", "火", "土", "金", "水"] },
+        "heavenly_body": { "type": "string" }
+      }
+    }
+  }
+}
