@@ -160,12 +160,20 @@ def extract_tables_claude(
 # ── 内部ヘルパー ──────────────────────────────────────
 
 _LIMIT_BYTES = 4 * 1024 * 1024   # 4 MB（Claude API 上限 5 MB に対して安全マージン）
-_MAX_SIDE    = 2000               # OCR精度を保ちつつサイズ削減
 
 
 def _b64_image(path: Path) -> tuple[str, str]:
-    """画像を base64 エンコードする。5MB超の場合はリサイズ + JPEG圧縮する。"""
+    """画像を base64 エンコードする。
+
+    4MB超の場合は解像度を落とさずJPEG変換（PNG 8MB → JPEG 1.5MB 程度）。
+    それでも超える場合のみ段階的にリサイズする。
+    """
+    import io
+    from PIL import Image
+
     raw = path.read_bytes()
+
+    # 小さければそのまま送る
     if len(raw) <= _LIMIT_BYTES:
         media = {
             ".png": "image/png",
@@ -176,18 +184,23 @@ def _b64_image(path: Path) -> tuple[str, str]:
         }.get(path.suffix.lower(), "image/png")
         return base64.standard_b64encode(raw).decode(), media
 
-    # 上限超過 → PIL でリサイズ＆JPEG圧縮
-    import io
-    from PIL import Image
-
+    # リサイズなしで JPEG 変換（解像度を最大限保持）
     img = Image.open(path).convert("RGB")
-    w, h = img.size
-    scale = min(_MAX_SIDE / max(w, h), 1.0)
-    if scale < 1.0:
-        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
-
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=88)
+    if len(buf.getvalue()) <= _LIMIT_BYTES:
+        return base64.standard_b64encode(buf.getvalue()).decode(), "image/jpeg"
+
+    # それでも超える場合のみ段階的リサイズ（4000 → 3000 → 2000px）
+    w, h = img.size
+    for max_side in (4000, 3000, 2000):
+        scale = min(max_side / max(w, h), 1.0)
+        resized = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+        buf = io.BytesIO()
+        resized.save(buf, format="JPEG", quality=88)
+        if len(buf.getvalue()) <= _LIMIT_BYTES:
+            break
+
     return base64.standard_b64encode(buf.getvalue()).decode(), "image/jpeg"
 
 
