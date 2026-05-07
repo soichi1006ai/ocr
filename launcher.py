@@ -41,6 +41,9 @@ class OCRWorker(QThread):
         spread: bool = False,
         formats: list[str] | None = None,
         api_key: str = "",
+        document_type: str = "auto",
+        model: str = "",
+        confidence_threshold: float = 0.85,
     ) -> None:
         super().__init__()
         self._files = files
@@ -51,6 +54,9 @@ class OCRWorker(QThread):
         self._spread = spread
         self._formats = formats or ["txt", "xlsx", "docx"]
         self._api_key = api_key
+        self._document_type = document_type
+        self._model = model
+        self._confidence_threshold = confidence_threshold
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -87,6 +93,12 @@ class OCRWorker(QThread):
                 cmd += ["--formats"] + self._formats
             if self._api_key:
                 cmd += ["--api-key", self._api_key]
+            if self._document_type != "auto":
+                cmd += ["--document-type", self._document_type]
+            if self._model:
+                cmd += ["--model", self._model]
+            if self._engine == "hybrid":
+                cmd += ["--confidence-threshold", str(self._confidence_threshold)]
             self.progress_line.emit(f"実行: {' '.join(str(c) for c in cmd[-6:])}")
             try:
                 proc = subprocess.Popen(
@@ -299,27 +311,82 @@ class MainWindow(QMainWindow):
         sbox = QVBoxLayout(settings)
         sbox.setSpacing(10)
 
-        # Engine
-        engine_row = QHBoxLayout()
-        engine_lbl = QLabel("エンジン")
-        engine_lbl.setFixedWidth(80)
-        engine_row.addWidget(engine_lbl)
-        self._engine_group = QButtonGroup(self)
-        self._paddle_radio = QRadioButton("PaddleOCR")
-        self._ndl_radio    = QRadioButton("NDLOCR（古典）")
-        self._claude_radio = QRadioButton("Claude（高精度）")
-        self._paddle_radio.setChecked(True)
-        self._engine_group.addButton(self._paddle_radio, 0)
-        self._engine_group.addButton(self._ndl_radio, 1)
-        self._engine_group.addButton(self._claude_radio, 2)
-        engine_row.addWidget(self._paddle_radio)
-        engine_row.addWidget(self._ndl_radio)
-        engine_row.addWidget(self._claude_radio)
-        engine_row.addStretch()
-        sbox.addLayout(engine_row)
+        # モード
+        mode_row = QHBoxLayout()
+        mode_lbl = QLabel("モード")
+        mode_lbl.setFixedWidth(80)
+        mode_row.addWidget(mode_lbl)
+        self._mode_group = QButtonGroup(self)
+        self._offline_radio = QRadioButton("オフライン")
+        self._hybrid_radio  = QRadioButton("ハイブリッド ★")
+        self._cloud_radio   = QRadioButton("精度")
+        self._hybrid_radio.setChecked(True)
+        self._mode_group.addButton(self._offline_radio, 0)
+        self._mode_group.addButton(self._hybrid_radio,  1)
+        self._mode_group.addButton(self._cloud_radio,   2)
+        for r in (self._offline_radio, self._hybrid_radio, self._cloud_radio):
+            mode_row.addWidget(r)
+        mode_row.addStretch()
+        sbox.addLayout(mode_row)
 
-        # API キー（Claude 選択時のみ表示）
-        self._apikey_row = QHBoxLayout()
+        # 文書種別
+        doctype_row = QHBoxLayout()
+        doctype_lbl = QLabel("文書種別")
+        doctype_lbl.setFixedWidth(80)
+        doctype_row.addWidget(doctype_lbl)
+        self._doctype_group = QButtonGroup(self)
+        self._dt_auto    = QRadioButton("自動")
+        self._dt_koyomi  = QRadioButton("暦表")
+        self._dt_daichou = QRadioButton("台帳")
+        self._dt_honbun  = QRadioButton("本文")
+        self._dt_auto.setChecked(True)
+        for i, r in enumerate((self._dt_auto, self._dt_koyomi, self._dt_daichou, self._dt_honbun)):
+            self._doctype_group.addButton(r, i)
+            doctype_row.addWidget(r)
+        doctype_row.addStretch()
+        sbox.addLayout(doctype_row)
+
+        # 信頼度閾値（ハイブリッドモード時のみ表示）
+        from PyQt6.QtWidgets import QSlider
+        self._threshold_widget = QWidget()
+        threshold_row = QHBoxLayout(self._threshold_widget)
+        threshold_row.setContentsMargins(0, 0, 0, 0)
+        threshold_lbl = QLabel("信頼度閾値")
+        threshold_lbl.setFixedWidth(80)
+        threshold_row.addWidget(threshold_lbl)
+        self._threshold_slider = QSlider(Qt.Orientation.Horizontal)
+        self._threshold_slider.setRange(50, 99)
+        self._threshold_slider.setValue(85)
+        self._threshold_slider.setFixedWidth(160)
+        self._threshold_val_lbl = QLabel("0.85")
+        self._threshold_val_lbl.setFixedWidth(36)
+        self._threshold_slider.valueChanged.connect(
+            lambda v: self._threshold_val_lbl.setText(f"{v/100:.2f}")
+        )
+        threshold_row.addWidget(self._threshold_slider)
+        threshold_row.addWidget(self._threshold_val_lbl)
+        threshold_row.addStretch()
+        sbox.addWidget(self._threshold_widget)
+
+        # モデル選択（精度モード時のみ表示）
+        self._model_widget = QWidget()
+        model_row = QHBoxLayout(self._model_widget)
+        model_row.setContentsMargins(0, 0, 0, 0)
+        model_lbl = QLabel("モデル")
+        model_lbl.setFixedWidth(80)
+        model_row.addWidget(model_lbl)
+        self._model_combo = QComboBox()
+        self._model_combo.addItem("Opus 4.7（高精度）",   "claude-opus-4-7")
+        self._model_combo.addItem("Sonnet 4.6（高速）", "claude-sonnet-4-6")
+        self._model_combo.setFixedWidth(200)
+        model_row.addWidget(self._model_combo)
+        model_row.addStretch()
+        sbox.addWidget(self._model_widget)
+
+        # API キー（ハイブリッド or 精度モード時のみ表示）
+        self._apikey_widget = QWidget()
+        self._apikey_row = QHBoxLayout(self._apikey_widget)
+        self._apikey_row.setContentsMargins(0, 0, 0, 0)
         apikey_lbl = QLabel("API Key")
         apikey_lbl.setFixedWidth(80)
         self._apikey_row.addWidget(apikey_lbl)
@@ -327,11 +394,11 @@ class MainWindow(QMainWindow):
         self._apikey_edit.setPlaceholderText("sk-ant-... （空欄の場合は環境変数 ANTHROPIC_API_KEY を使用）")
         self._apikey_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self._apikey_row.addWidget(self._apikey_edit)
-        self._apikey_widget = QWidget()
-        self._apikey_widget.setLayout(self._apikey_row)
-        self._apikey_widget.setVisible(False)
         sbox.addWidget(self._apikey_widget)
-        self._claude_radio.toggled.connect(self._apikey_widget.setVisible)
+
+        # モード切替で表示を更新
+        self._mode_group.buttonToggled.connect(lambda *_: self._update_mode_ui())
+        self._update_mode_ui()
 
         # DPI
         dpi_row = QHBoxLayout()
@@ -477,10 +544,30 @@ class MainWindow(QMainWindow):
         if d:
             self._output_edit.setText(d)
 
+    def _update_mode_ui(self) -> None:
+        is_hybrid  = self._hybrid_radio.isChecked()
+        is_cloud   = self._cloud_radio.isChecked()
+        is_offline = self._offline_radio.isChecked()
+        self._threshold_widget.setVisible(is_hybrid)
+        self._model_widget.setVisible(is_cloud)
+        self._apikey_widget.setVisible(not is_offline)
+
     def _selected_engine(self) -> str:
-        if self._claude_radio.isChecked(): return "claude"
-        if self._ndl_radio.isChecked():   return "ndlocr"
+        if self._cloud_radio.isChecked():  return "claude"
+        if self._hybrid_radio.isChecked(): return "hybrid"
         return "paddleocr"
+
+    def _selected_document_type(self) -> str:
+        mapping = {0: "auto", 1: "koyomi", 2: "daichou", 3: "honbun"}
+        return mapping.get(self._doctype_group.checkedId(), "auto")
+
+    def _selected_model(self) -> str:
+        if self._cloud_radio.isChecked():
+            return self._model_combo.currentData() or ""
+        return ""
+
+    def _selected_confidence(self) -> float:
+        return self._threshold_slider.value() / 100.0
 
     def _selected_api_key(self) -> str:
         return self._apikey_edit.text().strip()
@@ -520,19 +607,28 @@ class MainWindow(QMainWindow):
         self._clear_btn.setEnabled(False)
         self._progress.setVisible(True)
         self._log.clear()
-        self._log_line(f"エンジン: {self._selected_engine()}  DPI: {self._dpi_spin.value()}")
+        engine = self._selected_engine()
+        doc_type = self._selected_document_type()
+        self._log_line(f"モード: {engine}  文書種別: {doc_type}  DPI: {self._dpi_spin.value()}")
+        if engine == "hybrid":
+            self._log_line(f"信頼度閾値: {self._selected_confidence():.2f}")
+        if engine == "claude":
+            self._log_line(f"モデル: {self._selected_model()}")
         self._log_line(f"出力先: {out_dir}")
         self._log_line("─" * 50)
 
         self._worker = OCRWorker(
             files=[Path(p) for p in self._files],
-            engine=self._selected_engine(),
+            engine=engine,
             dpi=self._dpi_spin.value(),
             output_dir=out_dir,
             ocr_py=self.OCR_PY,
             spread=self._spread_check.isChecked(),
             formats=self._selected_formats(),
             api_key=self._selected_api_key(),
+            document_type=doc_type,
+            model=self._selected_model(),
+            confidence_threshold=self._selected_confidence(),
         )
         self._worker.progress_line.connect(self._log_line)
         self._worker.file_started.connect(self._on_file_started)

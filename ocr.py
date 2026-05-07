@@ -35,14 +35,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--engine",
-        choices=["paddleocr", "ndlocr", "claude"],
+        choices=["paddleocr", "ndlocr", "claude", "hybrid"],
         default="paddleocr",
-        help="OCR engine: paddleocr (default) / ndlocr (historical Japanese) / claude (highest accuracy)",
+        help="OCR engine: paddleocr / ndlocr / claude / hybrid",
     )
     parser.add_argument(
         "--api-key",
         default=None,
         help="Anthropic API key for Claude engine (default: ANTHROPIC_API_KEY env var)",
+    )
+    parser.add_argument(
+        "--document-type",
+        choices=["auto", "koyomi", "daichou", "honbun"],
+        default="auto",
+        help="Document type hint for the OCR engine",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Claude model ID (e.g. claude-opus-4-7, claude-sonnet-4-6)",
+    )
+    parser.add_argument(
+        "--confidence-threshold",
+        type=float,
+        default=0.85,
+        help="Confidence threshold for hybrid engine (0.0-1.0, default: 0.85)",
     )
     parser.add_argument(
         "--spread",
@@ -81,7 +98,46 @@ def main(argv: list[str] | None = None) -> int:
 
         print(f"[engine: {args.engine}]")
 
-        if args.engine == "claude":
+        if args.engine == "hybrid":
+            from engines.hybrid_engine import HybridEngine
+            from engines.base import DocumentType
+            doc_type = DocumentType(args.document_type)
+            engine = HybridEngine(
+                api_key=args.api_key or None,
+                confidence_threshold=args.confidence_threshold,
+            )
+            def _hybrid_progress(current, total, msg):
+                print(f"[{current}/{total}] {msg}")
+            result = engine.extract(image_paths, doc_type, on_progress=_hybrid_progress)
+            if not result.pages:
+                raise Exception("Hybrid OCR: 全ページ失敗")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            fmt = set(args.formats)
+            raw_text = result.all_raw_text()
+            if "txt" in fmt:
+                txt_path = output_dir / "result.txt"
+                txt_path.write_text(raw_text, encoding="utf-8")
+                print(f"Done: text output written to {txt_path}")
+            if "xlsx" in fmt:
+                from table_extractor import write_tables_to_workbook
+                tables = []
+                for page in result.pages:
+                    tables.extend(page.table_blocks)
+                if tables:
+                    wb_path = write_tables_to_workbook(tables, output_dir / "tables.xlsx")
+                    if wb_path:
+                        print(f"Done: Excel output written to {wb_path}")
+            if "docx" in fmt:
+                from docx_exporter import write_docx_results
+                docx_path = write_docx_results(result.pages, [], output_dir / "result.docx")
+                if docx_path:
+                    print(f"Done: Word output written to {docx_path}")
+            if result.errors:
+                for e in result.errors:
+                    print(f"Warning: page {e.page_number} failed: {e.message}", file=sys.stderr)
+            return 0
+
+        elif args.engine == "claude":
             from claude_engine import ClaudeOCRError, extract_tables_claude, run_claude_ocr
             api_key = args.api_key or None
             ocr_batch = run_claude_ocr(
