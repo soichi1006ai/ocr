@@ -4,10 +4,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from docx_exporter import DocxExportError, write_docx_results
-from layout_analyzer import LayoutAnalysisError, analyze_document_layout
+from exporters.docx_exporter import DocxExportError, write_docx_results
+from engines.paddle_internal.layout_analyzer import LayoutAnalysisError, analyze_document_layout
 from pdf_converter import PDFConversionError, PageSelectionError, convert_pdf_to_images
-from table_extractor import TableExtractionError, extract_tables, write_tables_to_workbook
+from exporters.table_extractor import TableExtractionError, extract_tables, write_tables_to_workbook
 from text_extractor import OCRProcessingError, extract_text_from_images, write_text_results
 
 
@@ -119,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
                 txt_path.write_text(raw_text, encoding="utf-8")
                 print(f"Done: text output written to {txt_path}")
             if "xlsx" in fmt:
-                from table_extractor import write_tables_to_workbook
+                from exporters.table_extractor import write_tables_to_workbook
                 tables = []
                 for page in result.pages:
                     tables.extend(page.table_blocks)
@@ -128,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
                     if wb_path:
                         print(f"Done: Excel output written to {wb_path}")
             if "docx" in fmt:
-                from docx_exporter import write_docx_results
+                from exporters.docx_exporter import write_docx_results
                 docx_path = write_docx_results(result.pages, [], output_dir / "result.docx")
                 if docx_path:
                     print(f"Done: Word output written to {docx_path}")
@@ -151,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
             tables = extract_tables_claude(image_paths, api_key=api_key)
             layout_batch = None
         elif args.engine == "ndlocr":
-            from ndlocr_engine import NDLOCRError, extract_tables_ndlocr, run_ndlocr
+            from engines.ndlocr_engine import NDLOCRError, extract_tables_ndlocr, run_ndlocr
             ocr_batch = run_ndlocr(
                 image_paths,
                 on_progress=_print_progress,
