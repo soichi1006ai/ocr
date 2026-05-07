@@ -1,0 +1,5 @@
+# Claude API モード（クラウド・高精度）
+-r requirements.txt
+anthropic>=0.50
+python-dotenv>=1.0
+tenacity>=8.2        # API リトライ
