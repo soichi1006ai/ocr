@@ -1,0 +1,7 @@
+# PaddleOCR ローカルモード（オフライン・高速）
+# Python 3.11.x 必須（3.12+ 非対応）
+-r requirements.txt
+paddleocr==2.7.3
+paddlepaddle==2.6.2
+numpy>=1.24,<2       # paddlepaddle / torch との ABI 互換
+opencv-python

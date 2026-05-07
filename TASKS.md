@@ -20,7 +20,7 @@
 
 | フェーズ | 内容 | 想定期間 | 状態 |
 |---|---|---|---|
-| 0 | 準備・ブランチ戦略決定 | 0.5週 | ⬜ |
+| 0 | 準備・ブランチ戦略決定 | 0.5週 | ✅ |
 | 1 | ドメイン知識ベース構築 | 2週 | ⬜ |
 | 2 | エンジン抽象化レイヤー | 1週 | ⬜ |
 | 3 | Claude エンジン全面リプレイス | 3週 | ⬜ |
@@ -36,53 +36,53 @@
 
 # フェーズ 0: 準備（0.5週）
 
-## T0.1: ブランチ戦略の確定とリリース計画
+## T0.1: ブランチ戦略の確定とリリース計画✅ 完了 (2026-05-07)
 
 **目的**: v1 と v2 が混在するリポジトリで安全に開発を進める
 
 **タスク**:
-- [ ] `main` ブランチを v1 の最終形としてフリーズ（タグ `v1.0.0` を付与）
-- [ ] `v2-dev` ブランチを切る（v2 開発の統合先）
-- [ ] 各タスクは `feature/v2-tXX-名前` 形式のブランチで実施
-- [ ] PR は `v2-dev` に向ける、`main` にはマージしない
+- [x] `main` ブランチを v1 の最終形としてフリーズ（タグ `v1.0.0` を付与）
+- [x] `v2-dev` ブランチを切る（v2 開発の統合先）
+- [x] 各タスクは `feature/v2-tXX-名前` 形式のブランチで実施
+- [x] PR は `v2-dev` に向ける、`main` にはマージしない
 - [ ] 全フェーズ完了後にまとめて `v2-dev` → `main` にマージし `v2.0.0` タグ
 
 **受け入れ基準**:
-- `git tag v1.0.0` が main の最新コミットに付いている
-- `v2-dev` ブランチが GitHub に存在する
+- `git tag v1.0.0` が main の最新コミットに付いている ✅
+- `v2-dev` ブランチが GitHub に存在する ✅
 
 ---
 
-## T0.2: 環境変数とシークレット管理
+## T0.2: 環境変数とシークレット管理 ✅ 完了 (2026-05-07)
 
 **目的**: Claude API キーの安全な管理を確立
 
 **タスク**:
-- [ ] `.env.example` を作成（`ANTHROPIC_API_KEY=` の雛形）
-- [ ] `.gitignore` に `.env` を追加（既にあれば確認）
-- [ ] `python-dotenv` を `requirements-cloud.txt` に追加
-- [ ] README に「API キー設定方法」セクション追加
+- [x] `.env.example` を作成（`ANTHROPIC_API_KEY=` の雛形）
+- [x] `.gitignore` に `.env` を追加
+- [x] `python-dotenv` を `requirements-cloud.txt` に追加
+- [ ] README に「API キー設定方法」セクション追加（T0.3完了後にまとめて更新）
 - [ ] Anthropic Console で月額使用上限を設定（推奨 $50/月、運用実績で調整）
 
 **受け入れ基準**:
-- `.env` がリポジトリに含まれていない
-- `.env.example` を参照すれば誰でもセットアップできる
+- `.env` がリポジトリに含まれていない ✅
+- `.env.example` を参照すれば誰でもセットアップできる ✅
 
 ---
 
-## T0.3: requirements の3分割
+## T0.3: requirements の3分割 ✅ 完了 (2026-05-07)
 
 **目的**: モードごとに依存を分離して環境構築を軽量化
 
 **タスク**:
-- [ ] `requirements.txt`: 全モード共通の最小依存（Pillow, pdf2image, openpyxl など）
-- [ ] `requirements-cloud.txt`: `anthropic`, `python-dotenv`, `tenacity`（リトライ）
-- [ ] `requirements-local.txt`: `paddleocr==2.7.3`, `paddlepaddle==2.6.2`, `numpy<2`, `opencv-python` など
+- [x] `requirements.txt`: 全モード共通の最小依存（Pillow, pdf2image, openpyxl など）
+- [x] `requirements-cloud.txt`: `anthropic`, `python-dotenv`, `tenacity`
+- [x] `requirements-local.txt`: `paddleocr==2.7.3`, `paddlepaddle==2.6.2`, `numpy<2`, `opencv-python`
 - [ ] README に「軽量インストール（クラウドのみ）」「フルインストール」の手順を分けて記載
 
 **受け入れ基準**:
-- `pip install -r requirements.txt -r requirements-cloud.txt` だけでクラウドモードが動く
-- `pip install -r requirements.txt -r requirements-local.txt` で従来環境
+- `pip install -r requirements.txt -r requirements-cloud.txt` だけでクラウドモードが動く ✅
+- `pip install -r requirements.txt -r requirements-local.txt` で従来環境 ✅
 
 ---
 

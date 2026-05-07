@@ -4,3 +4,7 @@ __pycache__/
 test_output/
 output/
 *.pdf
+
+# シークレット
+.env
+.env.local

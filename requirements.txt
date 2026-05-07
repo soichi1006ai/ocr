@@ -1,9 +1,6 @@
-easyocr>=1.7.0
-numpy>=1.24,<2
+# 全モード共通の最小依存
 pdf2image
 Pillow
 openpyxl
 python-docx
-opencv-python
 PyQt6>=6.5
-anthropic>=0.50
