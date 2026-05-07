@@ -1,0 +1,9 @@
+{
+  "document_type": "daichou",
+  "date": "天明6年5月",
+  "entries": [
+    {"id": 1, "person": "中村利兵衛", "item": "塩二俵", "amount": "銀八匁五分"},
+    {"id": 2, "person": "小林久兵衛", "item": "薪五束", "amount": "銀二匁"},
+    {"id": 3, "person": "松本源助", "item": "炭三俵", "amount": "銀十二匁"}
+  ]
+}

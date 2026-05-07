@@ -1,0 +1,9 @@
+{
+  "document_type": "daichou",
+  "date": "元禄5年3月",
+  "entries": [
+    {"id": 1, "person": "山田太郎", "item": "米五俵", "amount": "金二両"},
+    {"id": 2, "person": "鈴木次郎", "item": "麦三俵", "amount": "金一両二分"},
+    {"id": 3, "person": "佐藤三郎", "item": "大豆一俵", "amount": "銀十匁"}
+  ]
+}

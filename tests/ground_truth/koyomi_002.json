@@ -1,0 +1,40 @@
+{
+  "document_type": "koyomi",
+  "year": "寛文10年",
+  "months": [
+    {
+      "month": "3月",
+      "days": [
+        {"day": 1,  "kanshi": "丙午"},
+        {"day": 2,  "kanshi": "丁未"},
+        {"day": 3,  "kanshi": "戊申"},
+        {"day": 4,  "kanshi": "己酉"},
+        {"day": 5,  "kanshi": "庚戌"},
+        {"day": 6,  "kanshi": "辛亥"},
+        {"day": 7,  "kanshi": "壬子"},
+        {"day": 8,  "kanshi": "癸丑"},
+        {"day": 9,  "kanshi": "甲寅"},
+        {"day": 10, "kanshi": "乙卯"},
+        {"day": 11, "kanshi": "丙辰"},
+        {"day": 12, "kanshi": "丁巳"},
+        {"day": 13, "kanshi": "戊午"},
+        {"day": 14, "kanshi": "己未"},
+        {"day": 15, "kanshi": "庚申"},
+        {"day": 16, "kanshi": "辛酉"},
+        {"day": 17, "kanshi": "壬戌"},
+        {"day": 18, "kanshi": "癸亥"},
+        {"day": 19, "kanshi": "甲子"},
+        {"day": 20, "kanshi": "乙丑"},
+        {"day": 21, "kanshi": "丙寅"},
+        {"day": 22, "kanshi": "丁卯"},
+        {"day": 23, "kanshi": "戊辰"},
+        {"day": 24, "kanshi": "己巳"},
+        {"day": 25, "kanshi": "庚午"},
+        {"day": 26, "kanshi": "辛未"},
+        {"day": 27, "kanshi": "壬申"},
+        {"day": 28, "kanshi": "癸酉"},
+        {"day": 29, "kanshi": "甲戌"}
+      ]
+    }
+  ]
+}
