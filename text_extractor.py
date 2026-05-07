@@ -166,6 +166,62 @@ def _flatten_ocr_result(raw_result) -> str:
     return "\n".join(lines)
 
 
+def _extract_lines_with_scores(raw_result) -> list[tuple[str, float]]:
+    """Extract (text, confidence) per OCR line from PaddleOCR raw output."""
+    lines: list[tuple[str, float]] = []
+    for block in raw_result or []:
+        if not block:
+            continue
+        for line in block:
+            if not line or len(line) < 2:
+                continue
+            candidate = line[1]
+            if isinstance(candidate, (list, tuple)) and len(candidate) >= 2:
+                text, score = candidate[0], candidate[1]
+            elif isinstance(candidate, (list, tuple)) and candidate:
+                text, score = candidate[0], 1.0
+            else:
+                text, score = candidate, 1.0
+            if not isinstance(text, str) or not text.strip():
+                continue
+            normalized = _normalize_ocr_text(text.strip())
+            if normalized and not _is_noise_line(normalized):
+                conf = float(score) if isinstance(score, (int, float)) else 1.0
+                lines.append((normalized, max(0.0, min(1.0, conf))))
+    return lines
+
+
+def extract_blocks_from_image(
+    image_path: str | Path,
+    *,
+    engine: Optional[OCREngine] = None,
+) -> list[tuple[str, float]]:
+    """
+    Returns (text, confidence) per OCR line from a single image.
+    Applies the same normalization and noise filtering as extract_text_from_image.
+    """
+    path = Path(image_path).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Image file not found: {path}")
+
+    ocr_engine = engine or PaddleOCREngine()
+    segment_paths: list[Path] = []
+    result: list[tuple[str, float]] = []
+    try:
+        segment_paths = split_image_for_vertical_ocr(path)
+        for segment_path in segment_paths:
+            raw = ocr_engine.ocr(str(segment_path), cls=True)
+            result.extend(_extract_lines_with_scores(raw))
+    except ImagePreprocessingError as exc:
+        raise OCRProcessingError(str(exc)) from exc
+    except Exception as exc:
+        raise OCRProcessingError(f"OCR failed for image: {path}") from exc
+    finally:
+        for seg in segment_paths:
+            seg.unlink(missing_ok=True)
+    return result
+
+
 def _infer_page_number(image_path: Path, *, fallback: int) -> int:
     stem = image_path.stem
     if stem.startswith("page_"):

@@ -10,7 +10,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from engines.base import (
     DocumentType, ExtractionResult, OCREngine, PageResult, Block,
 )
-from engines.paddle_engine import PaddleEngine, ocr_batch_to_extraction_result, _to_page_result
+from engines.paddle_engine import (
+    PaddleEngine, ocr_batch_to_extraction_result, _to_page_result, _blocks_to_page_result,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -110,35 +112,39 @@ def test_paddle_engine_raises_without_paddleocr(monkeypatch):
 
 
 def test_paddle_engine_extract_mocked():
-    """PaddleOCREngine をモックして extract() の変換ロジックを検証"""
-    batch = _make_ocr_batch(
-        pages=[
-            _make_ocr_page_result(1, "元禄十五年"),
-            _make_ocr_page_result(2, "甲子"),
-        ],
-        errors=[_make_ocr_page_error(3, "timeout")],
-    )
-
+    """extract_blocks_from_image をモックして extract() の変換ロジックを検証"""
     engine = PaddleEngine.__new__(PaddleEngine)
     engine.name = "paddle"
     engine._inner = MagicMock()
 
-    with patch("engines.paddle_engine.extract_text_from_images", return_value=batch) as mock_ex:
+    page1_blocks = [("元禄十五年", 0.95), ("甲子", 0.88)]
+    page2_blocks = [("乙丑", 0.90)]
+
+    def _fake_blocks(img_path, engine=None):
+        name = Path(img_path).name
+        if name == "page_001.png":
+            return page1_blocks
+        if name == "page_002.png":
+            return page2_blocks
+        raise RuntimeError("timeout")
+
+    with patch("engines.paddle_engine.extract_blocks_from_image", side_effect=_fake_blocks):
         result = engine.extract(
-            [Path("p1.png"), Path("p2.png"), Path("p3.png")],
+            [Path("page_001.png"), Path("page_002.png"), Path("page_003.png")],
             document_type=DocumentType.KOYOMI,
         )
 
     assert len(result.pages) == 2
     assert len(result.errors) == 1
-    assert result.pages[0].raw_text == "元禄十五年"
-    assert result.pages[1].document_type is DocumentType.KOYOMI
-    assert result.errors[0].error == "timeout"
+    assert "元禄十五年" in result.pages[0].raw_text
+    assert result.pages[0].document_type is DocumentType.KOYOMI
+    assert result.pages[0].blocks[0].confidence == 0.95
+    assert result.pages[0].blocks[1].confidence == 0.88
+    assert "timeout" in result.errors[0].error
 
 
 def test_paddle_engine_progress_callback_called():
     """on_progress が正しく呼ばれる"""
-    batch = _make_ocr_batch(pages=[_make_ocr_page_result(1, "test")])
     engine = PaddleEngine.__new__(PaddleEngine)
     engine.name = "paddle"
     engine._inner = MagicMock()
@@ -148,15 +154,87 @@ def test_paddle_engine_progress_callback_called():
     def on_progress(current, total, msg):
         calls.append((current, total, msg))
 
-    def _fake_extract(image_paths, engine, on_progress=None):
-        if on_progress:
-            on_progress(1, 1)  # 1ページ完了をシミュレート
-        return batch
-
-    with patch("engines.paddle_engine.extract_text_from_images", side_effect=_fake_extract):
-        engine.extract([Path("p1.png")], on_progress=on_progress)
+    with patch("engines.paddle_engine.extract_blocks_from_image", return_value=[("test", 0.9)]):
+        engine.extract([Path("page_001.png")], on_progress=on_progress)
 
     assert len(calls) == 1
-    assert calls[0][0] == 1  # current
-    assert calls[0][1] == 1  # total
+    assert calls[0][0] == 1
+    assert calls[0][1] == 1
     assert "PaddleOCR" in calls[0][2]
+
+
+# ---------------------------------------------------------------------------
+# _extract_lines_with_scores (text_extractor)
+# ---------------------------------------------------------------------------
+
+def test_extract_lines_with_scores_normal():
+    from text_extractor import _extract_lines_with_scores
+    raw = [[
+        [[[0, 0], [100, 0], [100, 20], [0, 20]], ["甲子", 0.93]],
+        [[[0, 25], [100, 25], [100, 45], [0, 45]], ["乙丑", 0.87]],
+    ]]
+    lines = _extract_lines_with_scores(raw)
+    assert len(lines) == 2
+    assert lines[0] == ("甲子", 0.93)
+    assert lines[1] == ("乙丑", 0.87)
+
+
+def test_extract_lines_with_scores_clamps_confidence():
+    from text_extractor import _extract_lines_with_scores
+    raw = [[
+        [[[0, 0], [1, 0], [1, 1], [0, 1]], ["甲子", 1.5]],
+        [[[0, 5], [1, 5], [1, 6], [0, 6]], ["乙丑", -0.1]],
+    ]]
+    lines = _extract_lines_with_scores(raw)
+    for _, conf in lines:
+        assert 0.0 <= conf <= 1.0
+
+
+def test_extract_lines_with_scores_empty():
+    from text_extractor import _extract_lines_with_scores
+    assert _extract_lines_with_scores(None) == []
+    assert _extract_lines_with_scores([]) == []
+    assert _extract_lines_with_scores([[]]) == []
+
+
+def test_extract_lines_with_scores_missing_confidence_defaults_to_1():
+    from text_extractor import _extract_lines_with_scores
+    # candidate は [text] のみ（confidence なし）
+    raw = [[
+        [[[0, 0], [1, 0], [1, 1], [0, 1]], ["甲子"]],
+    ]]
+    lines = _extract_lines_with_scores(raw)
+    assert lines[0][1] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# _blocks_to_page_result
+# ---------------------------------------------------------------------------
+
+def test_blocks_to_page_result_confidence_mean():
+    pr = _blocks_to_page_result(1, [("甲子", 0.8), ("乙丑", 0.9)], DocumentType.KOYOMI)
+    assert abs(pr.confidence - 0.85) < 1e-4
+
+
+def test_blocks_to_page_result_raw_text_joined():
+    pr = _blocks_to_page_result(1, [("甲子", 0.9), ("乙丑", 0.8)], DocumentType.KOYOMI)
+    assert pr.raw_text == "甲子\n乙丑"
+
+
+def test_blocks_to_page_result_empty_blocks():
+    pr = _blocks_to_page_result(1, [], DocumentType.KOYOMI)
+    assert pr.blocks == []
+    assert pr.confidence == 0.0
+    assert pr.raw_text == ""
+
+
+def test_blocks_to_page_result_block_type_is_line():
+    pr = _blocks_to_page_result(1, [("甲子", 0.95)], DocumentType.KOYOMI)
+    assert pr.blocks[0].type == "line"
+    assert pr.blocks[0].content == "甲子"
+    assert pr.blocks[0].confidence == 0.95
+
+
+def test_blocks_to_page_result_confidence_clamped():
+    pr = _blocks_to_page_result(1, [("甲子", 1.0), ("乙丑", 0.5)], DocumentType.KOYOMI)
+    assert 0.0 <= pr.confidence <= 1.0
